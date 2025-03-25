@@ -22,10 +22,17 @@ struct TableInitItem {
     ip_t dst_ip;
     qp_t dst_qp;
     eth_t connection;
+    int is_leaf;
+};
+
+enum direction_t {
+    UP,
+    DOWN
 };
 
 struct PackInfo {
     struct TableMatchItem basic_info;
+    int ack;
     val_t val;
 };
 

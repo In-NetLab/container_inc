@@ -23,4 +23,6 @@ int match_qp(qp_t a, qp_t b) {
 
 struct PackInfo from_pack(pack_t pack);
 
+void send_pack(struct PackInfo pack_data);
+
 #endif

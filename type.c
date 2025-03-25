@@ -9,3 +9,8 @@ struct PackInfo from_pack(pack_t pack) {
     assert(0);
     return nothing;
 }
+
+void send_pack(struct PackInfo pack_data) {
+    // not implemented
+    assert(0);
+}
