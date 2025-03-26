@@ -1,0 +1,2 @@
+/usr/bin/ar qc liblibiccl.a CMakeFiles/libiccl.dir/flow.c.o CMakeFiles/libiccl.dir/group.c.o CMakeFiles/libiccl.dir/transfer.c.o CMakeFiles/libiccl.dir/termination_api.c.o
+/usr/bin/ranlib liblibiccl.a
