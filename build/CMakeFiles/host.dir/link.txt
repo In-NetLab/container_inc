@@ -1,0 +1,1 @@
+/usr/bin/cc -g CMakeFiles/host.dir/host.c.o -o host   -L/home/ruizhe/netlab/comm_lib  -Wl,-rpath,/home/ruizhe/netlab/comm_lib liblibiccl.a -libverbs 
