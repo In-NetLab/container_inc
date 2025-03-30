@@ -281,21 +281,24 @@ uint32_t build_eth_packet
     // 6. data
     if(type == PACKET_TYPE_DATA) {
         unsigned char* d = (unsigned char*)(dst_packet + sizeof(eth_header_t) + sizeof(ipv4_header_t) + sizeof(udp_header_t) + sizeof(bth_header_t));
-        memcpy(d, data, data_len);
+        // memcpy(d, data, data_len);
+        for(int i = 0; i < data_len / 4; i++) {
+            ((uint32_t*)d)[i] = htonl(((uint32_t*)data)[i]);
+        }
     }
 
     // 7. icrc
     uint32_t* icrc = (uint32_t*)(dst_packet + total_len - 4);
     *icrc = compute_icrc(-1, dst_packet);
 
-    if(type == PACKET_TYPE_ACK || type == PACKET_TYPE_NAK) {
-        printf("========= ack =========\n");
-        for(int i = 0; i < total_len; i++) {
-            printf("%02x ", (unsigned char)dst_packet[i]);
-        }
-        printf("\n%d\n", total_len);
-        printf("========= ack =========\n");
-    }
+    // if(type == PACKET_TYPE_ACK || type == PACKET_TYPE_NAK) {
+    //     printf("========= ack =========\n");
+    //     for(int i = 0; i < total_len; i++) {
+    //         printf("%02x ", (unsigned char)dst_packet[i]);
+    //     }
+    //     printf("\n%d\n", total_len);
+    //     printf("========= ack =========\n");
+    // }
     
     return total_len;
 }

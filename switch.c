@@ -14,7 +14,7 @@
 
 // =========================== 配置信息(yaml or 控制器, 暂时硬编码) =======================
 #define N 16  // 交换机上各个数组的长度
-#define FAN_IN 1  // 交换机子节点个数
+#define FAN_IN 2  // 交换机子节点个数
 #define Idx(psn) ((psn) % N)
 
 // =====================================================================================
@@ -63,21 +63,30 @@ pcap_t *handles[FAN_IN + 1];
 void init_all() {
     // 此处修改连接配置
     root = 1;
+    uint8_t peer_macs[FAN_IN][6] = {
+        {0x52, 0x54, 0x00, 0xdf, 0x0c, 0x28},
+        {0x52, 0x54, 0x00, 0x00, 0xf9, 0xf3},
+    };
+    char *peer_ips[FAN_IN] = {
+        "10.50.183.146",
+        "10.50.183.234",
+    };
     for(int i = 0; i < FAN_IN; i++) {
         memcpy(conns[i].device, "ens3", 4);
         
         uint8_t my_mac[6] = {0x52, 0x54, 0x00, 0xba, 0xc7, 0x53};
-        uint8_t peer_mac[6] = {0x52, 0x54, 0x00, 0xdf, 0x0c, 0x28};
+        // uint8_t peer_mac[6] = {0x52, 0x54, 0x00, 0xdf, 0x0c, 0x28};
         memcpy(conns[i].my_mac, my_mac, 6);
-        memcpy(conns[i].peer_mac, peer_mac, 6);
+        memcpy(conns[i].peer_mac, peer_macs[i], 6);
 
         conns[i].my_ip = get_ip("10.50.183.171");
-        conns[i].peer_ip = get_ip("10.50.183.146");
+        // conns[i].peer_ip = get_ip("10.50.183.146");
+        conns[i].peer_ip = get_ip(peer_ips[i]);
 
-        conns[i].my_port = 23333;
+        conns[i].my_port = 23333 + i;
         conns[i].peer_port = 4791;
 
-        conns[i].my_qp = 28;
+        conns[i].my_qp = 28 + i;
         conns[i].peer_qp = 0; // 待填
         
         conns[i].psn = 0;
@@ -97,6 +106,9 @@ void init_all() {
     memset(bcast_arrival_state, 0, sizeof(bcast_arrival_state));
     memset(r_degree, 0, sizeof(r_degree));
     memset(agg_psn, 0, sizeof(agg_psn));
+    for(int i = 0; i < N; i++) {
+        agg_psn[i] = i;
+    }
 
 
     // 通信初始化
@@ -119,7 +131,7 @@ void init_all() {
 
 void forwarding(int conn_id, uint32_t psn, uint32_t type, uint32_t *data, int len) {
     LOG_FUNC_ENTRY(conn_id);
-    log_write(conn_id, "conn_id: %d, forwarding... type: %d, len: %d\n", conn_id, type, len);
+    log_write(conn_id, "conn_id: %d, forwarding... psn: %d, type: %d, len: %d\n", conn_id, psn,type, len);
     // 构造packet
     connection* conn;
     if(conn_id != FAN_IN)
@@ -135,7 +147,10 @@ void forwarding(int conn_id, uint32_t psn, uint32_t type, uint32_t *data, int le
         conn->my_port, conn->peer_port,
         conn->peer_qp, psn, psn + 1
     );
-    print_all(conn_id, packet);
+    // print_all(conn_id, packet);
+    if(type == PACKET_TYPE_DATA)
+        sleep(0);
+        // usleep(0);
 
     // 发送
     pcap_t *handle = handles[conn_id];
@@ -160,6 +175,11 @@ int cache(uint32_t psn, uint32_t *data, int len) {
     bcast_buffer[Idx(psn)].len = len;
     
     // 广播
+    printf("broadcast... psn: %d\n", psn);
+    for(int i = 0; i < len; i++) {
+        printf("%u ", bcast_buffer[Idx(psn)].buffer[i]);
+    }
+    printf("\n");
     broadcast(psn, data, len);
 }
 
@@ -173,7 +193,7 @@ int aggregate(int conn_id, uint32_t psn, uint32_t *data, int len) {
 
     pthread_mutex_lock(&agg_mutex);
     for(int i = 0; i < len; i++) {
-        agg_buffer[Idx(psn)].buffer[i] += data[i];
+        agg_buffer[Idx(psn)].buffer[i] += ntohl(data[i]);
     }
     agg_buffer[Idx(psn)].len = len;
     agg_degree[Idx(psn)]++;
@@ -233,7 +253,8 @@ int retransmit(int id, uint32_t psn) {
 void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u_char *packet) {
     int id = atoi((char*)user_data);
     LOG_FUNC_ENTRY(id);
-    print_all(id, packet);
+    // print_all(id, packet);
+    // sleep(1);
 
     eth_header_t* eth = (eth_header_t*)packet;
     ipv4_header_t* ip = (ipv4_header_t*)(packet + sizeof(eth_header_t));
@@ -269,20 +290,29 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
         log_write(id, "udp len: %d, data_len: %d\n", udp->length, data_len);
 
         if(id == FAN_IN) {
+            log_write(id, "downstream data...\n");
             // 下行数据, 广播
+            pthread_mutex_lock(&agg_mutex);
             if (psn < agg_psn[Idx(psn)]) {
                 // 滞后
+                pthread_mutex_unlock(&agg_mutex);
+                log_write(id, "lag\n");
                 forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0);
             } else if (psn > agg_psn[Idx(psn)]) {
                 // 超前, 不应该出现
+                pthread_mutex_unlock(&agg_mutex);
                 assert(0);
             } else {
                 // 持平
+                log_write(id, "equal\n");
+                pthread_mutex_unlock(&agg_mutex);
                 if (bcast_arrival_state[Idx(psn)] == 1) {
                     // 重传
+                    log_write(id, "retransmit\n");
                     forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0);
                 } else {
                     // 首传
+                    log_write(id, "first\n");
                     bcast_arrival_state[Idx(psn)] = 1;
 
                     // 发送ACK
@@ -294,18 +324,22 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
         } else {
             // 上行数据, 聚合
             log_write(id, "upstream data...\n");
+            pthread_mutex_lock(&agg_mutex);
             if (psn < agg_psn[Idx(psn)]) {
                 // 滞后
                 // 发送ACK
+                pthread_mutex_unlock(&agg_mutex);
                 log_write(id, "lag\n");
                 forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0);
             } else if (psn > agg_psn[Idx(psn)]) {
                 // 超前
                 // 重传模块
+                pthread_mutex_unlock(&agg_mutex);
                 log_write(id, "ahead\n");
                 retransmit(id, psn);
             } else {
                 // 持平
+                pthread_mutex_unlock(&agg_mutex);
                 log_write(id, "equal\n");
                 if (arrival_state[id][Idx(psn)] == 1 || bcast_arrival_state[Idx(psn)] == 1) {
                     // 重传 -> or条件如何理解
@@ -332,6 +366,7 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
 
         if(id == FAN_IN) {
             // 下行ACK
+            log_write(id, "downstream ack...\n");
             if(aeth->syn_msn == 0x00000000) {
                 // 收到ACK
                 if (psn == agg_psn[Idx(psn)]) {
@@ -345,8 +380,10 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
             }
         } else {
             // 上行ACK
-            if(aeth->syn_msn == 0x00000000) {
+            pthread_mutex_lock(&agg_mutex);
+            if((ntohl(aeth->syn_msn) >> 29) == 0) {
                 // 收到ACK
+                log_write(id, "upstream ack...\n");
                 if (psn == agg_psn[Idx(psn)] && r_arrival_state[id][Idx(psn)] == 0) {
                     r_arrival_state[id][Idx(psn)] = 1;
                     arrival_state[id][Idx(psn)] = 0;
@@ -355,14 +392,21 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
                     if (r_degree[Idx(psn)] == FAN_IN) {
                         // 说明该psn聚合完成
                         // agg_buffer ...
+                        log_write(id, "broadcast over...\n");
                         agg_degree[Idx(psn)] = 0;
+                        for(int i = 0; i < agg_buffer[Idx(psn)].len; i++) {
+                            agg_buffer[Idx(psn)].buffer[i] = 0;
+                        }
                         bcast_arrival_state[Idx(psn)] = 0;
                         r_degree[Idx(psn)] = 0;
                         agg_psn[Idx(psn)] += N; // 开始聚合下一个psn
                     }
                 }
+                pthread_mutex_unlock(&agg_mutex);
             } else {
                 // NAK
+                pthread_mutex_unlock(&agg_mutex);
+                log_write(id, "upstream nak...\n");
                 if (psn == agg_psn[Idx(psn)]) {
                     retransmit(id, psn);
                 }
@@ -374,7 +418,8 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
 
 
 void *background_receiving(void *arg) {
-    int id = *(int *)arg;
+    int id = (int)(intptr_t)arg;
+    printf("thread %d start...\n", id);
     connection* conn;
     if(id == FAN_IN)
         conn = &conn_father;
@@ -434,8 +479,7 @@ int main() {
 
     // 接收线程
     for(int i = 0; i < FAN_IN; i++) {
-        int tmp = i;
-        pthread_create(&receivers[i], NULL, background_receiving, (void *)&tmp);
+        pthread_create(&receivers[i], NULL, background_receiving, (void *)(intptr_t)i);
 
     }
 

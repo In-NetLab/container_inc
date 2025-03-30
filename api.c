@@ -369,7 +369,7 @@ void print_packet(const Packet *p) {
 
     printf("Packet Payload:\n");
     for (int i = 0; i < PAYLOAD_SIZE; i++) {
-        printf("  payload[%d]: %d (0x%08X)\n", i, p->payload[i], p->payload[i]);
+        printf("  payload[%d]: %d (0x%08X)\n", i, ntohl(p->payload[i]), p->payload[i]);
     }
     printf("===============================================\n");
 }
