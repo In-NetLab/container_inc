@@ -32,7 +32,7 @@ enum direction_t {
 
 struct PackInfo {
     struct TableMatchItem basic_info;
-    int ack;
+    int id;
     val_t val;
 };
 
