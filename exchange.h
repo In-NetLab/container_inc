@@ -36,7 +36,7 @@ struct PackInfo {
     val_t val;
 };
 
-void init_table(int son_count, struct TableInitItem *sons, struct TableInitItem *father);
+void init_table(int son_count, struct TableInitItem *sons, struct TableInitItem *father, int window_size);
 void on_receive_pack(pack_t pack);
 
 #endif

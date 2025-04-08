@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <stddef.h>
+#include <stdio.h>
 
 static const int TABLE_CAPACITY = 1024;
 static const int MAX_FAN_IN = 10;
@@ -77,7 +78,10 @@ static int Degree[MAX_W];
 
 // son 和 father 分别表示下层和上层连接，其中下层可能有多个
 // 所有TableInitItem的dst_ip都是当前交换机，src_ip是与之连接的结点
-void init_table(int son_count, struct TableInitItem *sons, struct TableInitItem *father) {
+void init_table(int son_count, struct TableInitItem *sons, struct TableInitItem *father, int window_size) {
+    assert(window_size % 2 == 0);
+    window = window_size;
+    half_window = window / 2;
     assert(son_count > 0);
     fan_in = son_count;
     // add data handling
