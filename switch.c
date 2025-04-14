@@ -64,22 +64,22 @@ void init_all() {
     // 此处修改连接配置
     root = 1;
     uint8_t peer_macs[FAN_IN][6] = {
-        {0x52, 0x54, 0x00, 0xdf, 0x0c, 0x28},
-        {0x52, 0x54, 0x00, 0x00, 0xf9, 0xf3},
+        {0x52, 0x54, 0x00, 0x72, 0xe6, 0x1c},
+        {0x52, 0x54, 0x00, 0x96, 0xb9, 0xe6},
     };
     char *peer_ips[FAN_IN] = {
-        "10.50.183.146",
-        "10.50.183.234",
+        "10.50.183.11",
+        "10.50.183.39",
     };
     for(int i = 0; i < FAN_IN; i++) {
         memcpy(conns[i].device, "ens3", 4);
         
-        uint8_t my_mac[6] = {0x52, 0x54, 0x00, 0xba, 0xc7, 0x53};
+        uint8_t my_mac[6] = {0x52, 0x54, 0x00, 0x11, 0xcd, 0x14};
         // uint8_t peer_mac[6] = {0x52, 0x54, 0x00, 0xdf, 0x0c, 0x28};
         memcpy(conns[i].my_mac, my_mac, 6);
         memcpy(conns[i].peer_mac, peer_macs[i], 6);
 
-        conns[i].my_ip = get_ip("10.50.183.171");
+        conns[i].my_ip = get_ip("10.50.183.104");
         // conns[i].peer_ip = get_ip("10.50.183.146");
         conns[i].peer_ip = get_ip(peer_ips[i]);
 
@@ -149,8 +149,9 @@ void forwarding(int conn_id, uint32_t psn, uint32_t type, uint32_t *data, int le
     );
     // print_all(conn_id, packet);
     if(type == PACKET_TYPE_DATA)
-        sleep(0);
+        // sleep(0);
         // usleep(0);
+        sched_yield();
 
     // 发送
     pcap_t *handle = handles[conn_id];

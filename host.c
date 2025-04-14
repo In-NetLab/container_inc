@@ -214,7 +214,7 @@ int main(int argc, char *argv[]) {
     int id = atoi(argv[1]);
     // client
     gender = 0;             
-    ip_p = "10.50.183.171"; 
+    ip_p = "10.50.183.104"; 
 
     init_all(id);
 
