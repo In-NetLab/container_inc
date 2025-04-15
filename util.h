@@ -1,6 +1,19 @@
 #include <stdint.h>
 #include <arpa/inet.h>
 
+enum MyAggType {
+    TYPE_ALLREDUCE,
+    TYPE_REDUCE,
+    TYPE_BROADCAST,
+};
+
+enum MyOpcode {
+    OP_ADD,
+    OP_MAX,
+    OP_MIN,
+};
+
+
 typedef struct {
     uint8_t  dst_mac[6];
     uint8_t  src_mac[6];
@@ -88,3 +101,6 @@ uint32_t build_eth_packet
     uint32_t qp, uint32_t psn, 
     uint32_t msn
 );
+
+int max(int a, int b);
+int min(int a, int b);

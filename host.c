@@ -41,65 +41,33 @@ void allreduce(struct iccl_communicator *comm, int32_t* src_data, int len, int32
     receive_sge_list[0].length = ICCL_HEADER_LEN;
     receive_sge_list[0].lkey = comm->mr_iccl_header->lkey;
 
-    for(int i = 0; i < WINDOW_SIZE; i++) {
-        // post receive
-        memset(&receive_sge_list[1], 0, sizeof(receive_sge_list[1]));
-        receive_sge_list[1].addr = (uintptr_t)(comm->receive_payload + i * sizeof(Packet));
-        receive_sge_list[1].length = sizeof(Packet);
-        receive_sge_list[1].lkey = comm->mr_receive_payload->lkey;
-        memset(&rr, 0, sizeof(rr));
-        rr.next = NULL;
-        rr.wr_id = i;
-        rr.sg_list = receive_sge_list;
-        rr.num_sge = 2;
-        int ret = ibv_post_recv(comm->qp, &rr, &receive_bad_wr);
-        printf("post recv ret %d\n", ret);
-
-        Packet packet;
-        packet.header.seq = i;
-        packet.header.type = PACKET_TYPE_DATA;
-        for(int j = 0; j < PAYLOAD_SIZE; j++) {
-            packet.payload[j] = src_data[i * PAYLOAD_SIZE + j];
-        }
-        Packet *send_payload = (Packet *)(comm->send_payload + (i % WINDOW_SIZE) * sizeof(Packet));
-        send_payload->header.seq = htonl(packet.header.seq);
-        send_payload->header.type = htonl(packet.header.type);
-        for(int i = 0; i < PAYLOAD_SIZE; i++) {
-            send_payload->payload[i] = htonl(packet.payload[i]);
-        }
-
-        struct ibv_qp_attr attr;
-        struct ibv_qp_init_attr init_attr;
-        
-        // post send
-        struct ibv_send_wr sr;
-        struct ibv_sge send_sge_list[2];
-        struct ibv_send_wr *send_bad_wr;
-        send_sge_list[0].addr = (uintptr_t)comm->iccl_header;
-        send_sge_list[0].length = ICCL_HEADER_LEN;
-        send_sge_list[0].lkey = comm->mr_iccl_header->lkey;
-        memset(&send_sge_list[1], 0, sizeof(send_sge_list[1]));
-        send_sge_list[1].addr = (uintptr_t)(comm->send_payload + (i % WINDOW_SIZE) * sizeof(Packet));
-        send_sge_list[1].length = sizeof(Packet);
-        send_sge_list[1].lkey = comm->mr_send_payload->lkey;
-        memset(&sr, 0, sizeof(sr));
-        sr.next = NULL;
-        sr.wr_id = i;
-        sr.sg_list = send_sge_list;
-        sr.num_sge = 2;
-        sr.opcode = IBV_WR_SEND ;
-        // only to check the ack reflection, no use
-        sr.send_flags = IBV_SEND_SIGNALED;
-        ret = ibv_post_send(comm->qp, &sr, &send_bad_wr);
-        printf("group %d post send ret %d\n", comm->group->group_id, ret);
-        ibv_query_qp(comm->qp, &attr, IBV_QP_STATE, &init_attr);
-        printf("after send QP state: %d\n", attr.qp_state);
-    }
+    // 控制报文
+    bool okk = false;
     struct ibv_qp_attr attr;
     struct ibv_qp_init_attr init_attr;
+    struct ibv_send_wr sr;
+    struct ibv_sge send_sge_list[1];
+    struct ibv_send_wr *send_bad_wr;
+    comm->iccl_header[0] = 0;
+    comm->iccl_header[1] = 1; // ****************
+    send_sge_list[0].addr = (uintptr_t)comm->iccl_header;
+    send_sge_list[0].length = ICCL_HEADER_LEN;
+    send_sge_list[0].lkey = comm->mr_iccl_header->lkey;
+    memset(&sr, 0, sizeof(sr));
+    sr.next = NULL;
+    sr.wr_id = 0;
+    sr.sg_list = send_sge_list;
+    sr.num_sge = 1;
+    sr.opcode = IBV_WR_SEND_WITH_IMM ;
+    // only to check the ack reflection, no use
+    sr.imm_data = htonl(1); // *************
+    sr.send_flags = IBV_SEND_SIGNALED;
+    int ret = ibv_post_send(comm->qp, &sr, &send_bad_wr);
+    printf("group %d post send imm ret %d\n", comm->group->group_id, ret);
     ibv_query_qp(comm->qp, &attr, IBV_QP_STATE, &init_attr);
-    printf("QP state: %d\n", attr.qp_state);
-    printf("post recv over...=======================\n");
+    printf("after send imm QP state: %d\n", attr.qp_state);
+
+    memset(comm->iccl_header, 0, ICCL_HEADER_LEN);
 
 
     // using poll, which will be replaced by event + poll
@@ -178,7 +146,7 @@ void allreduce(struct iccl_communicator *comm, int32_t* src_data, int len, int32
                         send_sge_list[1].lkey = comm->mr_send_payload->lkey;
                         memset(&sr, 0, sizeof(sr));
                         sr.next = NULL;
-                        sr.wr_id = cnt;
+                        sr.wr_id = cnt + 1;
                         sr.sg_list = send_sge_list;
                         sr.num_sge = 2;
                         sr.opcode = IBV_WR_SEND ;
@@ -197,6 +165,74 @@ void allreduce(struct iccl_communicator *comm, int32_t* src_data, int len, int32
                     }
                 }else if(tmp->status==IBV_WC_SUCCESS){
                     printf("other success\n");
+                    if(!okk) {
+                        okk = true;
+
+                        for(int i = 0; i < WINDOW_SIZE; i++) {
+                            // post receive
+                            memset(&receive_sge_list[1], 0, sizeof(receive_sge_list[1]));
+                            receive_sge_list[1].addr = (uintptr_t)(comm->receive_payload + i * sizeof(Packet));
+                            receive_sge_list[1].length = sizeof(Packet);
+                            receive_sge_list[1].lkey = comm->mr_receive_payload->lkey;
+                            memset(&rr, 0, sizeof(rr));
+                            rr.next = NULL;
+                            rr.wr_id = i;
+                            rr.sg_list = receive_sge_list;
+                            rr.num_sge = 2;
+                            int ret = ibv_post_recv(comm->qp, &rr, &receive_bad_wr);
+                            printf("post recv ret %d\n", ret);
+                    
+                            Packet packet;
+                            packet.header.seq = i;
+                            packet.header.type = PACKET_TYPE_DATA;
+                            for(int j = 0; j < PAYLOAD_SIZE; j++) {
+                                packet.payload[j] = src_data[i * PAYLOAD_SIZE + j];
+                            }
+                            Packet *send_payload = (Packet *)(comm->send_payload + (i % WINDOW_SIZE) * sizeof(Packet));
+                            send_payload->header.seq = htonl(packet.header.seq);
+                            send_payload->header.type = htonl(packet.header.type);
+                            for(int i = 0; i < PAYLOAD_SIZE; i++) {
+                                send_payload->payload[i] = htonl(packet.payload[i]);
+                            }
+                    
+                            struct ibv_qp_attr attr;
+                            struct ibv_qp_init_attr init_attr;
+                            
+                            // post send
+                            struct ibv_send_wr sr;
+                            struct ibv_sge send_sge_list[2];
+                            struct ibv_send_wr *send_bad_wr;
+                            send_sge_list[0].addr = (uintptr_t)comm->iccl_header;
+                            send_sge_list[0].length = ICCL_HEADER_LEN;
+                            send_sge_list[0].lkey = comm->mr_iccl_header->lkey;
+                            memset(&send_sge_list[1], 0, sizeof(send_sge_list[1]));
+                            send_sge_list[1].addr = (uintptr_t)(comm->send_payload + (i % WINDOW_SIZE) * sizeof(Packet));
+                            send_sge_list[1].length = sizeof(Packet);
+                            send_sge_list[1].lkey = comm->mr_send_payload->lkey;
+                            memset(&sr, 0, sizeof(sr));
+                            sr.next = NULL;
+                            sr.wr_id = i + 1;
+                            sr.sg_list = send_sge_list;
+                            sr.num_sge = 2;
+                            sr.opcode = IBV_WR_SEND ;
+                            // only to check the ack reflection, no use
+                            sr.send_flags = IBV_SEND_SIGNALED;
+                            ret = ibv_post_send(comm->qp, &sr, &send_bad_wr);
+                            printf("group %d post send ret %d\n", comm->group->group_id, ret);
+                            ibv_query_qp(comm->qp, &attr, IBV_QP_STATE, &init_attr);
+                            printf("after send QP state: %d\n", attr.qp_state);
+                        }
+                        struct ibv_qp_attr attr;
+                        struct ibv_qp_init_attr init_attr;
+                        ibv_query_qp(comm->qp, &attr, IBV_QP_STATE, &init_attr);
+                        printf("QP state: %d\n", attr.qp_state);
+                        printf("post recv over...=======================\n");
+
+                        // for(int i = 0; i < 3;i++) {
+                        //     printf("sleep %d\n", i);
+                        //     sleep(1);
+                        // }
+                    }
                 }else {
                     printf("what????????????????????????????\n");
                 }
@@ -222,10 +258,10 @@ int main(int argc, char *argv[]) {
 
     uint32_t data_size = 64;
     struct iccl_communicator *comm = iccl_communicator_create(group, data_size);
-    // for(int i = 0; i < 1;i++) {
-    //     printf("sleep %d\n", i);
-    //     sleep(1);
-    // }
+    for(int i = 0; i < 3;i++) {
+        printf("sleep %d\n", i);
+        sleep(1);
+    }
     printf("start...\n");
 
     allreduce(comm, in_data, IN_DATA_LEN, dst_data);

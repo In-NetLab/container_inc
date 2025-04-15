@@ -22,6 +22,7 @@
 typedef struct {
     int len;
     uint32_t buffer[1024];
+    int psn;
 } agg_buffer_t;
 
 
@@ -54,6 +55,11 @@ connection conn_father;
 int root; // 1表示根交换机
 
 pcap_t *handles[FAN_IN + 1];
+
+int ctrl_nums;
+int ctrl_state[FAN_IN];
+int agg_type;
+int agg_op;
 
 // =====================================================================================
 
@@ -127,6 +133,9 @@ void init_all() {
             return;
         }
     }
+
+    ctrl_nums = 0;
+    memset(ctrl_state, 0, sizeof(ctrl_state));
 }
 
 void forwarding(int conn_id, uint32_t psn, uint32_t type, uint32_t *data, int len) {
@@ -149,9 +158,9 @@ void forwarding(int conn_id, uint32_t psn, uint32_t type, uint32_t *data, int le
     );
     // print_all(conn_id, packet);
     if(type == PACKET_TYPE_DATA)
-        // sleep(0);
+        sleep(0);
         // usleep(0);
-        sched_yield();
+        // sched_yield();
 
     // 发送
     pcap_t *handle = handles[conn_id];
@@ -174,14 +183,25 @@ int cache(uint32_t psn, uint32_t *data, int len) {
         bcast_buffer[Idx(psn)].buffer[i] = data[i];
     }
     bcast_buffer[Idx(psn)].len = len;
+    bcast_buffer[Idx(psn)].psn = psn - 1;
     
     // 广播
-    printf("broadcast... psn: %d\n", psn);
+    printf("broadcast... psn: %d\n", bcast_buffer[Idx(psn)].psn);
     for(int i = 0; i < len; i++) {
         printf("%u ", bcast_buffer[Idx(psn)].buffer[i]);
     }
     printf("\n");
-    broadcast(psn, data, len);
+    broadcast(bcast_buffer[Idx(psn)].psn, data, len);
+}
+
+int _agg(int a, int b) {
+    if(agg_op == OP_ADD) {
+        return a + b;
+    } else if(agg_op == OP_MAX) {
+        return max(a, b);
+    } else if(agg_op == OP_MIN) {
+        return min(a, b);
+    }
 }
 
 int aggregate(int conn_id, uint32_t psn, uint32_t *data, int len) {
@@ -194,9 +214,10 @@ int aggregate(int conn_id, uint32_t psn, uint32_t *data, int len) {
 
     pthread_mutex_lock(&agg_mutex);
     for(int i = 0; i < len; i++) {
-        agg_buffer[Idx(psn)].buffer[i] += ntohl(data[i]);
+        agg_buffer[Idx(psn)].buffer[i] = _agg(agg_buffer[Idx(psn)].buffer[i], ntohl(data[i]));
     }
     agg_buffer[Idx(psn)].len = len;
+    agg_buffer[Idx(psn)].psn = psn - 1;
     agg_degree[Idx(psn)]++;
     pthread_mutex_unlock(&agg_mutex);
 
@@ -224,7 +245,7 @@ int retransmit(int id, uint32_t psn) {
     LOG_FUNC_ENTRY(id);
     if (bcast_arrival_state[Idx(psn)] == 1) {
         // 已有完整聚合结果
-        forwarding(id, agg_psn[Idx(psn)], PACKET_TYPE_DATA, bcast_buffer[Idx(psn)].buffer, bcast_buffer[Idx(psn)].len);
+        forwarding(id, bcast_buffer[Idx(psn)].psn, PACKET_TYPE_DATA, bcast_buffer[Idx(psn)].buffer, bcast_buffer[Idx(psn)].len);
     } else if (agg_degree[Idx(psn)] == FAN_IN) {
         // 完成本节点聚合
         // 单节点此处的本质是 agg buffer -> bcast buffer
@@ -279,7 +300,7 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
         assert(conns[id].peer_ip == ip->src_ip);
         // assert(conns[id].peer_qp == conns[id].my_qp);
         
-        return;
+        // return;
     }
 
     uint32_t psn = ntohl(bth->apsn) & 0x00FFFFFF; // TODO
@@ -412,6 +433,37 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
                     retransmit(id, psn);
                 }
             }
+        }
+    } else if(bth->opcode == 0x05) { // rc send only with imm
+        int32_t* imm_data = (int32_t*)(packet + sizeof(eth_header_t) + sizeof(ipv4_header_t) + sizeof(udp_header_t) + sizeof(bth_header_t));
+        char* payload = (char*)imm_data + 4;
+        if(ntohl(*imm_data) == 1) {
+            if (ctrl_state[id] == 1) {
+                return;
+            }
+            ctrl_state[id] = 1;
+            pthread_mutex_lock(&agg_mutex);
+            if (ctrl_nums == 0) {
+                agg_type = payload[0];
+                agg_op = payload[1];
+            } else {
+                assert(agg_type == payload[0]);
+                assert(agg_op == payload[1]);
+            }
+            assert(agg_type == TYPE_ALLREDUCE);
+            assert(agg_op <= OP_MIN);
+            ctrl_nums++;
+            if(ctrl_nums == FAN_IN) {
+                // 广播ACK
+                for(int i = 0; i < FAN_IN; i++) {
+                    forwarding(i, psn, PACKET_TYPE_ACK, NULL, 0);
+                }
+                printf("agg type: %d, op: %d\n", agg_type, agg_op);
+            }
+            pthread_mutex_unlock(&agg_mutex);
+        } else {
+            printf("imm data: %d, not implement...\n", *imm_data);
+            assert(false);
         }
     }
     LOG_FUNC_EXIT(id);
