@@ -62,6 +62,7 @@ void log_close() {
 }
 
 void log_write(int id, const char *format, ...) {
+    return;
     va_list args;
     struct timeval tv;
     struct tm tm;

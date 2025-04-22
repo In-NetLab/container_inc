@@ -143,6 +143,7 @@ uint32_t crc32(const void *data, size_t length) {
 
 // 计算 RoCEv2 ICRC
 uint32_t compute_icrc(int id, const char* eth_packet) {
+    // clock_t start = clock();
     ipv4_header_t* iip = (ipv4_header_t*)(eth_packet + sizeof(eth_header_t));
     int len = ntohs(iip->total_length) - 4; // 减去 icrc
 
@@ -170,6 +171,12 @@ uint32_t compute_icrc(int id, const char* eth_packet) {
     // printf("\n");
     // printf("crc ***********************************\n");
 
+    // uint32_t tmp = crc32(pack, len);
+    // clock_t end = clock();
+
+    // double elapsed_time = (double)(end - start) / CLOCKS_PER_SEC;
+    // printf("%s, Time taken: %f seconds\n", "build eth pack", elapsed_time);
+    // return tmp;
     return crc32(pack, len);
 }
 
@@ -224,8 +231,9 @@ uint32_t build_eth_packet
     uint32_t src_ip, uint32_t dst_ip,
     uint16_t src_port, uint16_t dst_port,
     uint32_t qp, uint32_t psn, 
-    uint32_t msn
+    uint32_t msn, int packet_type
 ) {
+    // clock_t start = clock();
     uint16_t total_len = sizeof(eth_header_t) + sizeof(ipv4_header_t) + sizeof(udp_header_t) + sizeof(bth_header_t) + data_len + 4; // 4 为icrc
     if(type == PACKET_TYPE_ACK || type == PACKET_TYPE_NAK)
         total_len += sizeof(aeth_t);
@@ -261,7 +269,7 @@ uint32_t build_eth_packet
     // 4. bth hdr
     bth_header_t* bth = (bth_header_t*)(dst_packet + sizeof(eth_header_t) + sizeof(ipv4_header_t) + sizeof(udp_header_t));
     if(type == PACKET_TYPE_DATA)
-        bth->opcode = 0x04;
+        bth->opcode = packet_type;
     else
         bth->opcode = 0x11;
     bth->se_m_pad = 0x00;
@@ -300,5 +308,17 @@ uint32_t build_eth_packet
     //     printf("========= ack =========\n");
     // }
     
+    // clock_t end = clock();
+
+    // double elapsed_time = (double)(end - start) / CLOCKS_PER_SEC;
+    // printf("%s, type: %d, Time taken: %f seconds\n", "build eth pack", type, elapsed_time);
     return total_len;
+}
+
+uint64_t get_now_ts() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    long long milliseconds = (long long)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    // printf("Timestamp (milliseconds): %lld\n", milliseconds);
+    return milliseconds;
 }

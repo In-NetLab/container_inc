@@ -21,7 +21,8 @@
 
 typedef struct {
     int len;
-    uint32_t buffer[1024];
+    int packet_type;
+    uint32_t buffer[1111];
 } agg_buffer_t;
 
 
@@ -64,22 +65,22 @@ void init_all() {
     // 此处修改连接配置
     root = 1;
     uint8_t peer_macs[FAN_IN][6] = {
-        {0x52, 0x54, 0x00, 0x72, 0xe6, 0x1c},
-        {0x52, 0x54, 0x00, 0x96, 0xb9, 0xe6},
+        {0x52, 0x54, 0x00, 0x52, 0x5d, 0xae},
+        {0x52, 0x54, 0x00, 0x5e, 0x4c, 0xb0},
     };
     char *peer_ips[FAN_IN] = {
-        "10.50.183.11",
-        "10.50.183.39",
+        "10.50.183.49",
+        "10.50.183.102",
     };
     for(int i = 0; i < FAN_IN; i++) {
         memcpy(conns[i].device, "ens3", 4);
         
-        uint8_t my_mac[6] = {0x52, 0x54, 0x00, 0x11, 0xcd, 0x14};
+        uint8_t my_mac[6] = {0x52, 0x54, 0x00, 0x46, 0x57, 0x82};
         // uint8_t peer_mac[6] = {0x52, 0x54, 0x00, 0xdf, 0x0c, 0x28};
         memcpy(conns[i].my_mac, my_mac, 6);
         memcpy(conns[i].peer_mac, peer_macs[i], 6);
 
-        conns[i].my_ip = get_ip("10.50.183.104");
+        conns[i].my_ip = get_ip("10.50.183.69");
         // conns[i].peer_ip = get_ip("10.50.183.146");
         conns[i].peer_ip = get_ip(peer_ips[i]);
 
@@ -121,7 +122,14 @@ void init_all() {
     int handle_num = (root == 1) ? FAN_IN : FAN_IN + 1;
     for(int i = 0; i < handle_num; i++) {
         char errbuf[PCAP_ERRBUF_SIZE];
-        handles[i] = pcap_open_live(conns[i].device, BUFSIZ, 1, 1000, errbuf);
+        // handles[i] = pcap_open_live(conns[i].device, BUFSIZ, 1, 1, errbuf);
+        handles[i] = pcap_create(conns[i].device, errbuf);
+        pcap_set_snaplen(handles[i], BUFSIZ);
+        pcap_set_promisc(handles[i], 1);
+        pcap_set_timeout(handles[i], 1);  // 1ms timeout
+        pcap_set_immediate_mode(handles[i], 1);
+        pcap_activate(handles[i]);
+
         if (handles[i] == NULL) {
             fprintf(stderr, "Could not open device: %s, err: %s\n", conns[i].device, errbuf);
             return;
@@ -129,7 +137,7 @@ void init_all() {
     }
 }
 
-void forwarding(int conn_id, uint32_t psn, uint32_t type, uint32_t *data, int len) {
+void forwarding(int conn_id, uint32_t psn, uint32_t type, uint32_t *data, int len, int packet_type) {
     LOG_FUNC_ENTRY(conn_id);
     log_write(conn_id, "conn_id: %d, forwarding... psn: %d, type: %d, len: %d\n", conn_id, psn,type, len);
     // 构造packet
@@ -145,13 +153,17 @@ void forwarding(int conn_id, uint32_t psn, uint32_t type, uint32_t *data, int le
         conn->my_mac, conn->peer_mac,
         conn->my_ip, conn->peer_ip,
         conn->my_port, conn->peer_port,
-        conn->peer_qp, psn, psn + 1
+        conn->peer_qp, psn, psn + 1, packet_type
     );
     // print_all(conn_id, packet);
-    if(type == PACKET_TYPE_DATA)
+    if(type == PACKET_TYPE_DATA) {
+        // 记上时间戳
+        ts_buffer[conn_id][Idx(psn)] = get_now_ts();
         // sleep(0);
-        // usleep(0);
-        sched_yield();
+        // usleep();
+        // sched_yield();
+    }
+        
 
     // 发送
     pcap_t *handle = handles[conn_id];
@@ -162,29 +174,30 @@ void forwarding(int conn_id, uint32_t psn, uint32_t type, uint32_t *data, int le
     LOG_FUNC_EXIT(conn_id);
 }
 
-void broadcast(uint32_t psn, uint32_t *data, int len) {
+void broadcast(uint32_t psn, uint32_t *data, int len, int packet_type) {
     for(int i = 0; i < FAN_IN; i++) {
-        forwarding(i, psn, PACKET_TYPE_DATA, data, len);
+        forwarding(i, psn, PACKET_TYPE_DATA, data, len, packet_type);
     }
 }
 
-int cache(uint32_t psn, uint32_t *data, int len) {
+int cache(uint32_t psn, uint32_t *data, int len, int packet_type) {
     // 缓存数据
     for(int i = 0; i < len; i++) {
         bcast_buffer[Idx(psn)].buffer[i] = data[i];
     }
     bcast_buffer[Idx(psn)].len = len;
+    bcast_buffer[Idx(psn)].packet_type = packet_type;
     
     // 广播
     printf("broadcast... psn: %d\n", psn);
-    for(int i = 0; i < len; i++) {
-        printf("%u ", bcast_buffer[Idx(psn)].buffer[i]);
-    }
-    printf("\n");
-    broadcast(psn, data, len);
+    // for(int i = 0; i < len; i++) {
+    //     //printf("%u ", bcast_buffer[Idx(psn)].buffer[i]);
+    // }
+    //printf("\n");
+    broadcast(psn, data, len, packet_type);
 }
 
-int aggregate(int conn_id, uint32_t psn, uint32_t *data, int len) {
+int aggregate(int conn_id, uint32_t psn, uint32_t *data, int len, int packet_type) {
     LOG_FUNC_ENTRY(conn_id);
     connection* conn;
     if(conn_id != FAN_IN)
@@ -197,6 +210,7 @@ int aggregate(int conn_id, uint32_t psn, uint32_t *data, int len) {
         agg_buffer[Idx(psn)].buffer[i] += ntohl(data[i]);
     }
     agg_buffer[Idx(psn)].len = len;
+    agg_buffer[Idx(psn)].packet_type = packet_type;
     agg_degree[Idx(psn)]++;
     pthread_mutex_unlock(&agg_mutex);
 
@@ -207,11 +221,11 @@ int aggregate(int conn_id, uint32_t psn, uint32_t *data, int len) {
             if (bcast_arrival_state[Idx(psn)] == 1) {
             } else {
                 bcast_arrival_state[Idx(psn)] = 1;
-                cache(psn, agg_buffer[Idx(psn)].buffer, len);
+                cache(psn, agg_buffer[Idx(psn)].buffer, len, packet_type);
             }
         } else {
             // 向上传
-            forwarding(FAN_IN, psn, PACKET_TYPE_DATA, agg_buffer[Idx(psn)].buffer, len);
+            forwarding(FAN_IN, psn, PACKET_TYPE_DATA, agg_buffer[Idx(psn)].buffer, len, agg_buffer[Idx(psn)].packet_type);
             // 时间戳
         }
         log_write(conn_id, "agg over...\n");
@@ -224,7 +238,7 @@ int retransmit(int id, uint32_t psn) {
     LOG_FUNC_ENTRY(id);
     if (bcast_arrival_state[Idx(psn)] == 1) {
         // 已有完整聚合结果
-        forwarding(id, agg_psn[Idx(psn)], PACKET_TYPE_DATA, bcast_buffer[Idx(psn)].buffer, bcast_buffer[Idx(psn)].len);
+        forwarding(id, agg_psn[Idx(psn)], PACKET_TYPE_DATA, bcast_buffer[Idx(psn)].buffer, bcast_buffer[Idx(psn)].len, bcast_buffer[Idx(psn)].packet_type);
     } else if (agg_degree[Idx(psn)] == FAN_IN) {
         // 完成本节点聚合
         // 单节点此处的本质是 agg buffer -> bcast buffer
@@ -232,12 +246,12 @@ int retransmit(int id, uint32_t psn) {
             assert(0);
         } else {
             // 向上重传
-            forwarding(FAN_IN, agg_psn[Idx(psn)], PACKET_TYPE_DATA, agg_buffer[Idx(psn)].buffer, agg_buffer[Idx(psn)].len);
+            forwarding(FAN_IN, agg_psn[Idx(psn)], PACKET_TYPE_DATA, agg_buffer[Idx(psn)].buffer, agg_buffer[Idx(psn)].len, agg_buffer[Idx(psn)].packet_type);
             // 时间戳
         }
     } else if (arrival_state[Idx(psn)] == 0) {
         // 尚未收到子节点数据, 向下NAK
-        forwarding(id, agg_psn[Idx(psn)], PACKET_TYPE_NAK, NULL, 0);
+        forwarding(id, agg_psn[Idx(psn)], PACKET_TYPE_NAK, NULL, 0, 0);
     }
 
     // 尚未收到其他子节点数据, 丢弃
@@ -266,7 +280,7 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
         conns[id].ok = 1;
         // conns[id].peer_qp = htonl(bth->qpn) & 0x00FFFFFF;
         conns[id].peer_qp = 0x11;
-        printf("peer qp: %u\n", conns[id].peer_qp);
+        //printf("peer qp: %u\n", conns[id].peer_qp);
 
         assert(memcmp(conns[id].my_mac, eth->dst_mac, 6) == 0);
         assert(memcmp(conns[id].peer_mac, eth->src_mac, 6) == 0);
@@ -279,13 +293,13 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
         assert(conns[id].peer_ip == ip->src_ip);
         // assert(conns[id].peer_qp == conns[id].my_qp);
         
-        return;
+        // return;
     }
 
     uint32_t psn = ntohl(bth->apsn) & 0x00FFFFFF; // TODO
     log_write(id, "psn: %u\n", psn);
 
-    if(bth->opcode == 0x04) { // rc send only
+    if(bth->opcode == 0x04 || bth->opcode == 0x00 || bth->opcode == 0x01 || bth->opcode == 0x02) { // rc send only
         uint32_t* data = (uint32_t*)(packet + sizeof(eth_header_t) + sizeof(ipv4_header_t) + sizeof(udp_header_t) + sizeof(bth_header_t));
         int data_len = (ntohs(udp->length) - sizeof(bth_header_t) - sizeof(udp_header_t) - 4) / sizeof(uint32_t); // icrc = 4
         log_write(id, "udp len: %d, data_len: %d\n", udp->length, data_len);
@@ -298,7 +312,7 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
                 // 滞后
                 pthread_mutex_unlock(&agg_mutex);
                 log_write(id, "lag\n");
-                forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0);
+                forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0, 0);
             } else if (psn > agg_psn[Idx(psn)]) {
                 // 超前, 不应该出现
                 pthread_mutex_unlock(&agg_mutex);
@@ -310,16 +324,16 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
                 if (bcast_arrival_state[Idx(psn)] == 1) {
                     // 重传
                     log_write(id, "retransmit\n");
-                    forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0);
+                    forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0, 0);
                 } else {
                     // 首传
                     log_write(id, "first\n");
                     bcast_arrival_state[Idx(psn)] = 1;
 
                     // 发送ACK
-                    forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0);
+                    forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0, 0);
                     // 缓存模块
-                    cache(psn, data, data_len);
+                    cache(psn, data, data_len, bth->opcode);
                 }
             }
         } else {
@@ -331,7 +345,7 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
                 // 发送ACK
                 pthread_mutex_unlock(&agg_mutex);
                 log_write(id, "lag\n");
-                forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0);
+                forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0, 0);
             } else if (psn > agg_psn[Idx(psn)]) {
                 // 超前
                 // 重传模块
@@ -346,7 +360,7 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
                     // 重传 -> or条件如何理解
                     log_write(id, "retransmit\n");
                     // 发送ACK
-                    forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0);
+                    forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0, 0);
                     // 重传模块
                     retransmit(id, psn);
                 } else {
@@ -356,9 +370,9 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
                     r_arrival_state[id][Idx(psn)] = 0;
 
                     // 发送ACK
-                    forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0);
+                    forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0, 0);
                     // 聚合模块
-                    aggregate(id, psn, data, data_len);
+                    aggregate(id, psn, data, data_len, bth->opcode);
                 }
             }
         }
@@ -389,6 +403,7 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
                     r_arrival_state[id][Idx(psn)] = 1;
                     arrival_state[id][Idx(psn)] = 0;
                     r_degree[Idx(psn)] += 1;
+                    ts_buffer[id][Idx(psn)] = 0;
     
                     if (r_degree[Idx(psn)] == FAN_IN) {
                         // 说明该psn聚合完成
@@ -464,6 +479,46 @@ void *background_receiving(void *arg) {
     return NULL;
 }
 
+void *polling_thread(void *arg) {
+    while(true) {
+        for(int i = 0; i < FAN_IN; i++) {
+            for(int j = 0; j < N; j++) {
+                uint64_t now_ts = get_now_ts();
+                if(ts_buffer[i][j] != 0 && now_ts - ts_buffer[i][j] > 100) {
+                    int tmp = j;
+                    printf("timeout, conn id: %d, n: %d, agg psn: %d, pack type: %d\n", i, tmp, agg_psn[tmp], bcast_buffer[tmp].packet_type);
+                    forwarding(i, agg_psn[tmp], PACKET_TYPE_DATA, bcast_buffer[tmp].buffer, bcast_buffer[tmp].len, bcast_buffer[tmp].packet_type);
+                    // 主动重传
+                    // int tmp = j;
+                    // while(true) {
+                    //     if(bcast_buffer[tmp].packet_type == 0x00) {
+                    //         break;
+                    //     } else {
+                    //         tmp--;
+                    //         if(tmp < 0)
+                    //             tmp = N - 1;
+                    //     }
+                    // }
+                    // while(true) {
+                    //     printf("timeout, conn id: %d, n: %d, agg psn: %d, pack type: %d\n", i, tmp, agg_psn[tmp], bcast_buffer[tmp].packet_type);
+                    //     forwarding(i, agg_psn[tmp], PACKET_TYPE_DATA, bcast_buffer[tmp].buffer, bcast_buffer[tmp].len, bcast_buffer[tmp].packet_type);
+                    //     if(bcast_buffer[tmp].packet_type == 0x02) {
+                    //         break;
+                    //     } else {
+                    //         tmp++;
+                    //         if(tmp >= N)
+                    //             tmp = 0;
+                    //     }
+                    // }
+                }
+            }
+        }
+
+        usleep(10000); // 10ms轮询一次
+    }
+    
+}
+
 // =====================================================================================
 
 
@@ -477,16 +532,19 @@ int main() {
     init_all();
 
     pthread_t receivers[FAN_IN];
+    pthread_t polling;
 
     // 接收线程
     for(int i = 0; i < FAN_IN; i++) {
         pthread_create(&receivers[i], NULL, background_receiving, (void *)(intptr_t)i);
 
     }
+    // pthread_create(&polling, NULL, polling_thread, NULL);
 
     for(int i = 0; i < FAN_IN; i++) {
         pthread_join(receivers[i], NULL);
     }
+    // pthread_join(polling, NULL);
 
     log_close();
     

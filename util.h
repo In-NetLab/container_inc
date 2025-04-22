@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <arpa/inet.h>
+#include <sys/time.h>
 
 typedef struct {
     uint8_t  dst_mac[6];
@@ -86,5 +87,7 @@ uint32_t build_eth_packet
     uint32_t src_ip, uint32_t dst_ip,
     uint16_t src_port, uint16_t dst_port,
     uint32_t qp, uint32_t psn, 
-    uint32_t msn
+    uint32_t msn, int packet_type
 );
+
+uint64_t get_now_ts();

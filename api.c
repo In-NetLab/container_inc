@@ -11,11 +11,6 @@ static int iccl_group_subscribe(struct iccl_group *group){
     return 1;
 }
 
-/* success 1, fail 0, socket will be written in group */
-// static int iccl_group_socket_connect(struct iccl_group *group){
-//     return 0;
-// }
-
 /* don't forget to modify the gender */
 struct iccl_group *iccl_group_create(int group_id){
     struct iccl_group *group = (struct iccl_group *)malloc(sizeof(struct iccl_group));
@@ -32,60 +27,18 @@ struct iccl_group *iccl_group_create(int group_id){
     {
         printf("%s\n",ibv_get_device_name(dev_list[i]));
     }
-    // if(group->local_gender == 1){
-    //     group->local_ib_ctx = ibv_open_device(dev_list[group->group_id - 1]);
-    // } else {
-    //     group->local_ib_ctx = ibv_open_device(dev_list[0]);
-    // }
+    
     group->local_ib_ctx = ibv_open_device(dev_list[0]);
-    // group->local_ib_ctx = ibv_open_device(dev_list[gender]);
+    
     ibv_free_device_list(dev_list);
     dev_list = NULL;
     ibv_query_device(group->local_ib_ctx, &group->local_device_attr);
     ibv_query_port(group->local_ib_ctx, group->local_ib_port, &group->local_port_attr);
 
-    group->payload_mtu = (2<<(group->local_port_attr.active_mtu + 7))-ICCL_HEADER_LEN;
-    printf("group payload mtu: %d\n", group->payload_mtu);
+    // group->payload_mtu = (2<<(group->local_port_attr.active_mtu + 7))-ICCL_HEADER_LEN;
+    // printf("group payload mtu: %d\n", group->payload_mtu);
     // subscribe to controller to get peer ip and gender
     iccl_group_subscribe(group);
-
-    // connect to peer in tcp
-    // if(group->local_gender==0){
-    //     // client
-    //     group->sock_fd = socket(AF_INET, SOCK_STREAM, 0);
-    //     struct sockaddr_in server_addr;
-    //     memset(&server_addr, 0, sizeof(server_addr));
-    //     server_addr.sin_family = AF_INET;
-    //     if(group_id == 1){
-    //         server_addr.sin_port = htons(TCP_PORT_1);
-    //     } else {
-    //         server_addr.sin_port = htons(TCP_PORT_2);
-    //     }
-    //     server_addr.sin_addr.s_addr = group->peer_ip;
-    //     while(connect(group->sock_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) continue;
-    //     printf("success conn\n");
-    // } else{
-    //     int server_fd;
-    //     struct sockaddr_in server_addr, client_addr;
-    //     socklen_t addr_len = sizeof(client_addr);
-    //     server_fd = socket(AF_INET, SOCK_STREAM, 0);
-
-    //     memset(&server_addr, 0, sizeof(server_addr));
-    //     server_addr.sin_family = AF_INET;
-    //     server_addr.sin_addr.s_addr = INADDR_ANY;
-    //     // server_addr.sin_port = htons(TCP_PORT);
-    //     if(group_id == 1){
-    //         server_addr.sin_port = htons(TCP_PORT_1);
-    //     } else {
-    //         server_addr.sin_port = htons(TCP_PORT_2);
-    //     }
-    //     bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr));
-    //     listen(server_fd, 10);
-    //     printf("listnen...\n");
-    //     group->sock_fd = accept(server_fd, (struct sockaddr *)&client_addr, &addr_len);
-    //     close(server_fd);
-    //     printf("success conn\n");
-    // }
 
     return group;
 }
@@ -97,33 +50,6 @@ int iccl_group_destroy(struct iccl_group *group) {
     return 1;
 }
 
-
-// exchange
-// static int iccl_sock_sync(int sock_fd, uint32_t size, char *send_addr, char *receive_addr){
-//     if(size==0){
-//         char sync;
-//         write(sock_fd, "s", 1);
-//         read(sock_fd, &sync, 1);
-//         return 0;
-//     }
-//     else{
-//         int read_bytes = 0;
-//         int total_read_bytes = 0;
-//         write(sock_fd, send_addr, size);
-
-//         while(total_read_bytes < size)
-//         {
-//             read_bytes = read(sock_fd, receive_addr, size);
-//             if(read_bytes > 0)
-//             {
-//                 total_read_bytes += read_bytes;
-//             }
-//             else break;
-//         }
-//     }
-//     return 0;
-// }
-
 struct iccl_communicator *iccl_communicator_create(struct iccl_group *group, uint32_t size){
     struct iccl_communicator *comm = (struct iccl_communicator *)malloc(sizeof(struct iccl_communicator));
     comm->group = group;
@@ -131,9 +57,9 @@ struct iccl_communicator *iccl_communicator_create(struct iccl_group *group, uin
     comm->pd = ibv_alloc_pd(group->local_ib_ctx);
 
     
-    int segment_num = (size+group->payload_mtu-1)/(group->payload_mtu);
+    int segment_num = size / 1024 / 4;
     printf("segment_num: %d\n",segment_num);
-    comm->payload_buf_size = segment_num * group->payload_mtu;
+    comm->payload_buf_size = size * 2;
     printf("payload_buf_size: %d\n",comm->payload_buf_size);
     comm->cq = ibv_create_cq(group->local_ib_ctx, segment_num, NULL, NULL,0);
     // mr
@@ -143,12 +69,10 @@ struct iccl_communicator *iccl_communicator_create(struct iccl_group *group, uin
     memset(comm->send_payload, 0 , comm->payload_buf_size);
     memset(comm->receive_payload, 0 , comm->payload_buf_size);
 
-    memset(comm->iccl_header, 0, ICCL_HEADER_LEN);
     int mr_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE ;
     comm->mr_send_payload = ibv_reg_mr(comm->pd, comm->send_payload, comm->payload_buf_size, mr_flags);
     comm->mr_receive_payload = ibv_reg_mr(comm->pd, comm->receive_payload, comm->payload_buf_size, mr_flags);
 
-    comm->mr_iccl_header = ibv_reg_mr(comm->pd, comm->iccl_header, ICCL_HEADER_LEN, mr_flags);
     // qp create
     struct ibv_qp_init_attr qp_init_attr;
     memset(&qp_init_attr, 0, sizeof(qp_init_attr));
@@ -171,7 +95,7 @@ struct iccl_communicator *iccl_communicator_create(struct iccl_group *group, uin
     local_info.lid = htons(group->local_port_attr.lid);
     local_info.qp_num = htonl(comm->qp->qp_num); // big end in connection
     // peer info
-    // iccl_sock_sync(group->sock_fd, sizeof(struct iccl_connection_info), (char *)&local_info, (char *)&peer_info);
+    
     comm->peer_gid = my_gid;
     uint8_t* ip = (uint8_t*)&group->peer_ip;
     for(int i = 12; i < 16; i++) {
@@ -195,7 +119,6 @@ struct iccl_communicator *iccl_communicator_create(struct iccl_group *group, uin
     qp_flags = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
     int ret = ibv_modify_qp(comm->qp, &attr, qp_flags);
     printf("ret of init %d\n",ret);
-    sleep(3);
     // qp to rtr
     memset(&attr, 0, sizeof(attr));
     attr.qp_state = IBV_QPS_RTR;
@@ -237,123 +160,6 @@ struct iccl_communicator *iccl_communicator_create(struct iccl_group *group, uin
 
 
 int iccl_communicator_destroy(struct iccl_communicator *comm);
-
-/*  user need to fill in the comm's buffer ahead.
-    size is smaller than bufsize 
-    depend on the type to convert to the big end
-    depend on the opcode to set the iccl_header of com
-
-    only implement "+"" and "int" by 3.3
-    */
-int iccl_allreduce(struct iccl_communicator *comm, void *src_addr, void *dst_addr, uint32_t size, int type, int opcode){
-    // iccl header default 0 means "+"
-    comm->iccl_header[0] = 0;
-    int *src_addr_int = (int *)src_addr;
-    int *dst_addr_int = (int *)dst_addr;
-    int *send_payload_int = (int *)comm->send_payload;
-    
-    for(int i = 0; i<size/sizeof(int); ++i){
-        send_payload_int[i] = htonl(src_addr_int[i]);
-    }
-
-    struct ibv_recv_wr rr;
-    struct ibv_sge receive_sge_list[2];
-    struct ibv_recv_wr *receive_bad_wr;
-    receive_sge_list[0].addr = (uintptr_t)comm->iccl_header;
-    receive_sge_list[0].length = ICCL_HEADER_LEN;
-    receive_sge_list[0].lkey = comm->mr_iccl_header->lkey;
-
-    struct ibv_send_wr sr;
-    struct ibv_sge send_sge_list[2];
-    struct ibv_send_wr *send_bad_wr;
-    send_sge_list[0].addr = (uintptr_t)comm->iccl_header;
-    send_sge_list[0].length = ICCL_HEADER_LEN;
-    send_sge_list[0].lkey = comm->mr_iccl_header->lkey;
-    int seq = 0;
-    for(int i_addr = 0; i_addr < size; i_addr+=comm->group->payload_mtu, seq+=1){
-        struct ibv_qp_attr attr;
-        struct ibv_qp_init_attr init_attr;
-        ibv_query_qp(comm->qp, &attr, IBV_QP_STATE, &init_attr);
-        printf("    1QP state: %d\n", attr.qp_state);
-        // post receive
-        memset(&receive_sge_list[1], 0, sizeof(receive_sge_list[1]));
-        receive_sge_list[1].addr = (uintptr_t)comm->receive_payload + seq * comm->group->payload_mtu;
-        receive_sge_list[1].length = comm->group->payload_mtu;
-        receive_sge_list[1].lkey = comm->mr_receive_payload->lkey;
-
-        memset(&rr, 0, sizeof(rr));
-        rr.next = NULL;
-        rr.wr_id = seq;
-        rr.sg_list = receive_sge_list;
-        rr.num_sge = 2;
-
-        int ret = ibv_post_recv(comm->qp, &rr, &receive_bad_wr);
-        printf("post recv ret %d\n", ret);
-        ibv_query_qp(comm->qp, &attr, IBV_QP_STATE, &init_attr);
-        printf("    2QP state: %d\n", attr.qp_state);
-        sleep(2);
-        // post send
-        memset(&send_sge_list[1], 0, sizeof(send_sge_list[1]));
-        send_sge_list[1].addr = (uintptr_t)comm->send_payload + seq * comm->group->payload_mtu;
-        send_sge_list[1].length = comm->group->payload_mtu;
-        send_sge_list[1].lkey = comm->mr_send_payload->lkey;
-
-        memset(&sr, 0, sizeof(sr));
-        sr.next = NULL;
-        sr.wr_id = seq+1000;
-        sr.sg_list = send_sge_list;
-        sr.num_sge = 2;
-        sr.opcode = IBV_WR_SEND ;
-        // only to check the ack reflection, no use
-        sr.send_flags = IBV_SEND_SIGNALED;
-        ret = ibv_post_send(comm->qp, &sr, &send_bad_wr);
-        printf("post send ret %d\n", ret);
-        ibv_query_qp(comm->qp, &attr, IBV_QP_STATE, &init_attr);
-        printf("    3QP state: %d\n", attr.qp_state);
-    }
-
-    // using poll, which will be replaced by event + poll
-    struct ibv_wc *wc = (struct ibv_wc *)malloc(sizeof(struct ibv_wc)*seq);
-    int accum=0, result=0;
-    printf("283\n");
-    do
-    {
-        result = ibv_poll_cq(comm->cq, seq, wc);
-        //accum+=result;
-        if(result>0){
-            struct ibv_qp_attr attr;
-            struct ibv_qp_init_attr init_attr;
-            ibv_query_qp(comm->qp, &attr, IBV_QP_STATE, &init_attr);
-            printf("QP state: %d\n", attr.qp_state);
-            printf("289\n");
-            for(int i=0; i<result;++i){
-                printf("result %d\n", result);
-                struct ibv_wc *tmp = wc+i;
-                printf("tmp->status %d\n", tmp->status);
-                printf("tmp->opcode %d\n", tmp->opcode);
-
-                if(tmp->status==IBV_WC_SUCCESS && tmp->opcode==IBV_WC_RECV){
-                    printf("    h\n");
-                    accum+=1;
-                    uint64_t id = tmp->wr_id;
-                    int *receive_tmp = (int *)((uintptr_t)comm->receive_payload + id * comm->group->payload_mtu);
-                    for(int j = 0;j<comm->group->payload_mtu/sizeof(int);++j){
-                        dst_addr_int[j] = ntohl(receive_tmp[j]);
-                        printf("%d: %d\n", j, ntohl(receive_tmp[j]));
-                    }
-                }else if(tmp->status==IBV_WC_SUCCESS){
-                    printf("    hh\n");
-                    accum+=1;
-                }
-                printf("    hhh\n");
-            }
-        }
-    }
-    while(accum != 2*seq);
-
-    return 0;
-
-}
 
 
 void print_packet(const Packet *p) {

@@ -28,8 +28,8 @@ extern char *ip_p;
 struct iccl_group{
     int group_id;
     uint32_t peer_ip;
-    int sock_fd;                           //TCP socket file descriptor
-    int payload_mtu; // minus header length
+    // int sock_fd;                           //TCP socket file descriptor
+    // int payload_mtu; // minus header length
     int local_ib_port; // 1 in default
     int local_gid_idx; // 1 in default
     bool local_gender; // 1 client, 0 server 
@@ -50,7 +50,7 @@ struct iccl_connection_info{
 struct iccl_communicator{
     struct iccl_group *group;
     uint32_t payload_buf_size; // need to up round, mod payload_mtu
-    char iccl_header[ICCL_HEADER_LEN]; // first bytes in buffer
+    // char iccl_header[ICCL_HEADER_LEN]; // first bytes in buffer
     char *send_payload; // following bytes in buffer
     char *receive_payload;
     struct ibv_pd *pd;
@@ -58,7 +58,7 @@ struct iccl_communicator{
     struct ibv_qp *qp;
     struct ibv_mr *mr_send_payload;
     struct ibv_mr *mr_receive_payload;
-    struct ibv_mr *mr_iccl_header;
+    // struct ibv_mr *mr_iccl_header;
     // peer info
     uint16_t peer_lid;
     uint32_t peer_qp_num;
@@ -68,7 +68,7 @@ struct iccl_communicator{
 #define PACKET_TYPE_DATA 0
 #define PACKET_TYPE_ACK 1
 #define PACKET_TYPE_NAK 2
-#define PAYLOAD_SIZE 16
+#define PAYLOAD_SIZE 1024
 
 typedef struct {
     uint32_t seq;
