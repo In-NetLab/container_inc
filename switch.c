@@ -155,9 +155,9 @@ int aggregate(int conn_id, uint32_t psn, uint32_t *data, int len) {
     else
         conn = &conn_father;
 
-    if(arrival_state[id][Idx(psn)] == 0) {
-        arrival_state[id][Idx(psn)] = 1;
-        arrival_state[id][Idx(psn + N)] = 0;
+    if(arrival_state[conn_id][Idx(psn)] == 0) {
+        arrival_state[conn_id][Idx(psn)] = 1;
+        arrival_state[conn_id][Idx(psn + N)] = 0;
         pthread_mutex_lock(&agg_mutex);
         for(int i = 0; i < len; i++) {
             agg_buffer[Idx(psn)].buffer[i] += ntohl(data[i]);
