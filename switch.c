@@ -15,7 +15,7 @@
 // =========================== 配置信息(yaml or 控制器, 暂时硬编码) =======================
 #define N 16  // 交换机上各个数组的长度
 #define FAN_IN 2  // 交换机子节点个数
-#define Idx(psn) ((psn) % N)
+#define Idx(psn) ((psn) % (N << 1))
 
 // =====================================================================================
 
@@ -29,25 +29,13 @@ typedef struct {
 // 通信组
 struct iccl_communicator* comms[FAN_IN];
 // 入流: FAN_IN个 报文抵达数组: 0-1计数器, 标识上行数据是否到达 
-int arrival_state[FAN_IN][N];
-// 出流: 时间戳数组
-int64_t ts_buffer[FAN_IN][N];
-// 出流: 广播确认报文抵达数组: 0-1计数器, 标识发送广播报文后, 是否收到ACK?
-int r_arrival_state[FAN_IN][N];
+int arrival_state[FAN_IN][N << 1];
 
 // 每组: 聚合缓冲区: 聚合器, 用于聚合(AllReduce累加即可)
-agg_buffer_t agg_buffer[N];
+agg_buffer_t agg_buffer[N << 1];
 // 每组: 聚合度数组: 计数器, 标识当前有多少上行数据已经参与聚合(应该就等于报文抵达数组列求和??)
-int agg_degree[N];
+int agg_degree[N << 1];
 pthread_mutex_t agg_mutex = PTHREAD_MUTEX_INITIALIZER;
-// 每组: 广播缓冲区: 聚合总结果(下行的?)
-agg_buffer_t bcast_buffer[N];
-// 每组: 广播报文抵达数组: 0-1计数器, (抵达是指: 上面的聚合结果到了本交换机??)
-int bcast_arrival_state[N];
-// 每组: 聚合结果广播度数组: 计数器, 标识聚合结果被多少子节点收到(应该是收到多少ACK??等于确认报文抵达数组列和??)
-int r_degree[N];
-// 每组: 聚合号数组: PSN, 记录当前位置聚合器中的数据报文的序列号(不能用索引idx, idx=(PSN % size), 这个size是不是就是数组长度?)
-int agg_psn[N];
 
 connection conns[FAN_IN];
 connection conn_father;
@@ -98,17 +86,8 @@ void init_all() {
     // gender = 1;               
     // ip_p = "10.50.183.146";
     memset(arrival_state, 0, sizeof(arrival_state));
-    memset(ts_buffer, 0, sizeof(ts_buffer));
-    memset(r_arrival_state, 0, sizeof(r_arrival_state));
     memset(agg_buffer, 0, sizeof(agg_buffer));
     memset(agg_degree, 0, sizeof(agg_degree));
-    memset(bcast_buffer, 0, sizeof(bcast_buffer));
-    memset(bcast_arrival_state, 0, sizeof(bcast_arrival_state));
-    memset(r_degree, 0, sizeof(r_degree));
-    memset(agg_psn, 0, sizeof(agg_psn));
-    for(int i = 0; i < N; i++) {
-        agg_psn[i] = i;
-    }
 
 
     // 通信初始化
@@ -168,22 +147,6 @@ void broadcast(uint32_t psn, uint32_t *data, int len) {
     }
 }
 
-int cache(uint32_t psn, uint32_t *data, int len) {
-    // 缓存数据
-    for(int i = 0; i < len; i++) {
-        bcast_buffer[Idx(psn)].buffer[i] = data[i];
-    }
-    bcast_buffer[Idx(psn)].len = len;
-    
-    // 广播
-    printf("broadcast... psn: %d\n", psn);
-    for(int i = 0; i < len; i++) {
-        printf("%u ", bcast_buffer[Idx(psn)].buffer[i]);
-    }
-    printf("\n");
-    broadcast(psn, data, len);
-}
-
 int aggregate(int conn_id, uint32_t psn, uint32_t *data, int len) {
     LOG_FUNC_ENTRY(conn_id);
     connection* conn;
@@ -192,56 +155,35 @@ int aggregate(int conn_id, uint32_t psn, uint32_t *data, int len) {
     else
         conn = &conn_father;
 
-    pthread_mutex_lock(&agg_mutex);
-    for(int i = 0; i < len; i++) {
-        agg_buffer[Idx(psn)].buffer[i] += ntohl(data[i]);
+    if(arrival_state[id][Idx(psn)] == 0) {
+        arrival_state[id][Idx(psn)] = 1;
+        arrival_state[id][Idx(psn + N)] = 0;
+        pthread_mutex_lock(&agg_mutex);
+        for(int i = 0; i < len; i++) {
+            agg_buffer[Idx(psn)].buffer[i] += ntohl(data[i]);
+            agg_buffer[Idx(psn + N)].buffer[i] = 0;
+        }
+        agg_buffer[Idx(psn)].len = len;
+        agg_degree[Idx(psn)]++;
+
+        agg_buffer[Idx(psn + N)].len = 0;
+        agg_degree[Idx(psn + N)] = 0;
+        pthread_mutex_unlock(&agg_mutex);
     }
-    agg_buffer[Idx(psn)].len = len;
-    agg_degree[Idx(psn)]++;
-    pthread_mutex_unlock(&agg_mutex);
 
     if(agg_degree[Idx(psn)] == FAN_IN) {
         // forwarding
         if(root == 1) {
             // 对于单(根)交换机, agg buffer -> bcast buffer
-            if (bcast_arrival_state[Idx(psn)] == 1) {
-            } else {
-                bcast_arrival_state[Idx(psn)] = 1;
-                cache(psn, agg_buffer[Idx(psn)].buffer, len);
-            }
+            broadcast(psn, agg_buffer[Idx(psn)].buffer, len);
         } else {
             // 向上传
             forwarding(FAN_IN, psn, PACKET_TYPE_DATA, agg_buffer[Idx(psn)].buffer, len);
-            // 时间戳
         }
         log_write(conn_id, "agg over...\n");
         
     }
     LOG_FUNC_EXIT(conn_id);
-}
-
-int retransmit(int id, uint32_t psn) {
-    LOG_FUNC_ENTRY(id);
-    if (bcast_arrival_state[Idx(psn)] == 1) {
-        // 已有完整聚合结果
-        forwarding(id, agg_psn[Idx(psn)], PACKET_TYPE_DATA, bcast_buffer[Idx(psn)].buffer, bcast_buffer[Idx(psn)].len);
-    } else if (agg_degree[Idx(psn)] == FAN_IN) {
-        // 完成本节点聚合
-        // 单节点此处的本质是 agg buffer -> bcast buffer
-        if(root == 1) {
-            assert(0);
-        } else {
-            // 向上重传
-            forwarding(FAN_IN, agg_psn[Idx(psn)], PACKET_TYPE_DATA, agg_buffer[Idx(psn)].buffer, agg_buffer[Idx(psn)].len);
-            // 时间戳
-        }
-    } else if (arrival_state[Idx(psn)] == 0) {
-        // 尚未收到子节点数据, 向下NAK
-        forwarding(id, agg_psn[Idx(psn)], PACKET_TYPE_NAK, NULL, 0);
-    }
-
-    // 尚未收到其他子节点数据, 丢弃
-    LOG_FUNC_EXIT(id);
 }
 
 
@@ -293,74 +235,11 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
         if(id == FAN_IN) {
             log_write(id, "downstream data...\n");
             // 下行数据, 广播
-            pthread_mutex_lock(&agg_mutex);
-            if (psn < agg_psn[Idx(psn)]) {
-                // 滞后
-                pthread_mutex_unlock(&agg_mutex);
-                log_write(id, "lag\n");
-                forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0);
-            } else if (psn > agg_psn[Idx(psn)]) {
-                // 超前, 不应该出现
-                pthread_mutex_unlock(&agg_mutex);
-                assert(0);
-            } else {
-                // 持平
-                log_write(id, "equal\n");
-                pthread_mutex_unlock(&agg_mutex);
-                if (bcast_arrival_state[Idx(psn)] == 1) {
-                    // 重传
-                    log_write(id, "retransmit\n");
-                    forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0);
-                } else {
-                    // 首传
-                    log_write(id, "first\n");
-                    bcast_arrival_state[Idx(psn)] = 1;
-
-                    // 发送ACK
-                    forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0);
-                    // 缓存模块
-                    cache(psn, data, data_len);
-                }
-            }
+            broadcast(psn, data, data_len);
         } else {
             // 上行数据, 聚合
             log_write(id, "upstream data...\n");
-            pthread_mutex_lock(&agg_mutex);
-            if (psn < agg_psn[Idx(psn)]) {
-                // 滞后
-                // 发送ACK
-                pthread_mutex_unlock(&agg_mutex);
-                log_write(id, "lag\n");
-                forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0);
-            } else if (psn > agg_psn[Idx(psn)]) {
-                // 超前
-                // 重传模块
-                pthread_mutex_unlock(&agg_mutex);
-                log_write(id, "ahead\n");
-                retransmit(id, psn);
-            } else {
-                // 持平
-                pthread_mutex_unlock(&agg_mutex);
-                log_write(id, "equal\n");
-                if (arrival_state[id][Idx(psn)] == 1 || bcast_arrival_state[Idx(psn)] == 1) {
-                    // 重传 -> or条件如何理解
-                    log_write(id, "retransmit\n");
-                    // 发送ACK
-                    forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0);
-                    // 重传模块
-                    retransmit(id, psn);
-                } else {
-                    // 首传
-                    log_write(id, "first\n");
-                    arrival_state[id][Idx(psn)] = 1;
-                    r_arrival_state[id][Idx(psn)] = 0;
-
-                    // 发送ACK
-                    forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0);
-                    // 聚合模块
-                    aggregate(id, psn, data, data_len);
-                }
-            }
+            aggregate(id, psn, data, data_len);
         }
     } else if(bth->opcode == 0x11) { // rc ack
         aeth_t* aeth = (aeth_t*)(packet + sizeof(eth_header_t) + sizeof(ipv4_header_t) + sizeof(udp_header_t) + sizeof(bth_header_t));
@@ -368,50 +247,12 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
         if(id == FAN_IN) {
             // 下行ACK
             log_write(id, "downstream ack...\n");
-            if(aeth->syn_msn == 0x00000000) {
-                // 收到ACK
-                if (psn == agg_psn[Idx(psn)]) {
-                    // 计时器取消
-                }
-            } else {
-                // NAK
-                if (psn == agg_psn[Idx(psn)] && bcast_arrival_state[Idx(psn)] == 0) {
-                    retransmit(id, psn);
-                }
-            }
+            assert(0); // 连接不终结模式中交换机没有下行ACK
         } else {
             // 上行ACK
-            pthread_mutex_lock(&agg_mutex);
-            if((ntohl(aeth->syn_msn) >> 29) == 0) {
-                // 收到ACK
-                log_write(id, "upstream ack...\n");
-                if (psn == agg_psn[Idx(psn)] && r_arrival_state[id][Idx(psn)] == 0) {
-                    r_arrival_state[id][Idx(psn)] = 1;
-                    arrival_state[id][Idx(psn)] = 0;
-                    r_degree[Idx(psn)] += 1;
-    
-                    if (r_degree[Idx(psn)] == FAN_IN) {
-                        // 说明该psn聚合完成
-                        // agg_buffer ...
-                        log_write(id, "broadcast over...\n");
-                        agg_degree[Idx(psn)] = 0;
-                        for(int i = 0; i < agg_buffer[Idx(psn)].len; i++) {
-                            agg_buffer[Idx(psn)].buffer[i] = 0;
-                        }
-                        bcast_arrival_state[Idx(psn)] = 0;
-                        r_degree[Idx(psn)] = 0;
-                        agg_psn[Idx(psn)] += N; // 开始聚合下一个psn
-                    }
-                }
-                pthread_mutex_unlock(&agg_mutex);
-            } else {
-                // NAK
-                pthread_mutex_unlock(&agg_mutex);
-                log_write(id, "upstream nak...\n");
-                if (psn == agg_psn[Idx(psn)]) {
-                    retransmit(id, psn);
-                }
-            }
+            // 需要发回ACK
+            log_write(id, "returning ack...\n");
+            forwarding(id, psn, PACKET_TYPE_ACK, NULL, 0);
         }
     }
     LOG_FUNC_EXIT(id);
