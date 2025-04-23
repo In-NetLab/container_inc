@@ -160,22 +160,3 @@ struct iccl_communicator *iccl_communicator_create(struct iccl_group *group, uin
 
 
 int iccl_communicator_destroy(struct iccl_communicator *comm);
-
-
-void print_packet(const Packet *p) {
-    printf("===============================================\n");
-    if (!p) {
-        printf("Packet is NULL!\n");
-        return;
-    }
-
-    printf("Packet Header:\n");
-    printf("  seq:  %u (0x%08X)\n", p->header.seq, p->header.seq);
-    printf("  type: %u (0x%08X)\n", p->header.type, p->header.type);
-
-    printf("Packet Payload:\n");
-    for (int i = 0; i < PAYLOAD_SIZE; i++) {
-        printf("  payload[%d]: %d (0x%08X)\n", i, ntohl(p->payload[i]), p->payload[i]);
-    }
-    printf("===============================================\n");
-}

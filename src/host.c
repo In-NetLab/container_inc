@@ -1,4 +1,5 @@
 #include "api.h"
+#include "util.h"
 #include <assert.h>
 
 // 模拟上层应用数据
@@ -33,11 +34,11 @@ int post_send(struct iccl_communicator *comm, int32_t* src_data, int id) {
     struct ibv_sge send_sge;
     struct ibv_send_wr *send_bad_wr;
 
-    Packet packet;
+    my_packet_t packet;
     packet.header.seq = id;
     packet.header.type = PACKET_TYPE_DATA;
     memcpy(packet.payload, src_data + id * PAYLOAD_SIZE, PAYLOAD_SIZE * 4);
-    Packet *send_payload = (Packet *)(comm->send_payload + id * sizeof(Packet));
+    my_packet_t *send_payload = (my_packet_t *)(comm->send_payload + id * sizeof(my_packet_t));
     send_payload->header.seq = htonl(packet.header.seq);
     send_payload->header.type = htonl(packet.header.type);
     for(int i = 0; i < PAYLOAD_SIZE; i++) {
@@ -46,8 +47,8 @@ int post_send(struct iccl_communicator *comm, int32_t* src_data, int id) {
 
     
     memset(&send_sge, 0, sizeof(send_sge));
-    send_sge.addr = (uintptr_t)(comm->send_payload + id * sizeof(Packet));
-    send_sge.length = sizeof(Packet);
+    send_sge.addr = (uintptr_t)(comm->send_payload + id * sizeof(my_packet_t));
+    send_sge.length = sizeof(my_packet_t);
     send_sge.lkey = comm->mr_send_payload->lkey;
     memset(&sr, 0, sizeof(sr));
     sr.next = NULL;
@@ -76,8 +77,8 @@ void allreduce(struct iccl_communicator *comm, int32_t* src_data, int len, int32
     // post receive
     for(int i = 0; i < packet_num; i++) {
         memset(&receive_sge, 0, sizeof(receive_sge));
-        receive_sge.addr = (uintptr_t)(comm->receive_payload + i * sizeof(Packet));
-        receive_sge.length = sizeof(Packet);
+        receive_sge.addr = (uintptr_t)(comm->receive_payload + i * sizeof(my_packet_t));
+        receive_sge.length = sizeof(my_packet_t);
         receive_sge.lkey = comm->mr_receive_payload->lkey;
         memset(&rr, 0, sizeof(rr));
         rr.next = NULL;
@@ -109,7 +110,7 @@ void allreduce(struct iccl_communicator *comm, int32_t* src_data, int len, int32
                     printf("receive success\n");
 
                     uint64_t id = tmp->wr_id;
-                    Packet *pack = (Packet *)(comm->receive_payload + id * sizeof(Packet));
+                    my_packet_t *pack = (my_packet_t *)(comm->receive_payload + id * sizeof(my_packet_t));
                     for(int j = 0; j < PAYLOAD_SIZE; j++) {
                         dst_data[receive_num * PAYLOAD_SIZE + j] = ntohl(pack->payload[j]);
                     }

@@ -33,7 +33,7 @@ struct iccl_communicator* comms[FAN_IN];
 // 入流: FAN_IN个 报文抵达数组: 0-1计数器, 标识上行数据是否到达 
 int arrival_state[FAN_IN][N];
 // 出流: 时间戳数组
-int64_t ts_buffer[FAN_IN][N];
+int64_t ts_buffer[FAN_IN + 1][N];
 // 出流: 广播确认报文抵达数组: 0-1计数器, 标识发送广播报文后, 是否收到ACK
 int r_arrival_state[FAN_IN][N];
 
@@ -52,11 +52,8 @@ int r_degree[N];
 int agg_psn[N];
 
 // conns[FAN_IN] 为父节点
-connection conns[FAN_IN + 1];
-// connection conn_father;
+connection_t conns[FAN_IN + 1];
 int root; // 1表示根交换机
-
-// pcap_t *handles[FAN_IN + 1];
 
 rule_table_t table;
 
@@ -68,15 +65,20 @@ rule_table_t table;
 void init_all() {
     // 此处修改连接配置
     root = 1;
-    uint8_t peer_macs[FAN_IN][6] = {
+    uint8_t peer_macs[FAN_IN + 1][6] = {
         {0x52, 0x54, 0x00, 0x52, 0x5d, 0xae},
         {0x52, 0x54, 0x00, 0x5e, 0x4c, 0xb0},
+        {}
     };
-    char *peer_ips[FAN_IN] = {
+    char *peer_ips[FAN_IN + 1] = {
         "10.50.183.49",
         "10.50.183.102",
+        ""
     };
-    for(int i = 0; i < FAN_IN; i++) {
+    for(int i = 0; i < FAN_IN + 1; i++) {
+        if(root == 1 && i == FAN_IN)
+            continue;
+        
         memcpy(conns[i].device, "ens3", 4);
         
         uint8_t my_mac[6] = {0x52, 0x54, 0x00, 0x46, 0x57, 0x82};
@@ -130,7 +132,10 @@ void init_all() {
     }
 
     memset(&table, 0, sizeof(table));
-    for(int i = 0; i < FAN_IN; i++) {
+    for(int i = 0; i < FAN_IN + 1; i++) {
+        if(root == 1 && i == FAN_IN)
+            continue;
+
         rule_t rule;
         rule.src_ip = get_ip(peer_ips[i]);
         rule.dst_ip = get_ip("10.50.183.69");
@@ -138,14 +143,15 @@ void init_all() {
         rule.direction = DIR_UP;
         rule.ack_conn = &conns[i];
         rule.out_conns_cnt = 0;
-        if(root == 1) {
-            // 根交换机
+        if(root == 1 || (root == 0 && i == FAN_IN)) {
+            // 1. 对于根交换机，所有上行入流的出流均是广播子节点
+            // 2. 对于中间交换机的下行入流的出流均是广播子节点
             for(int j = 0; j < FAN_IN; j++) { // 广播
                 rule.out_conns[j] = &conns[j];
                 rule.out_conns_cnt++;
             }
         } else {
-            // 非根
+            // 中间交换机的上行入流
             rule.out_conns[0] = &conns[FAN_IN];
             rule.out_conns_cnt = 1;
         }
@@ -160,7 +166,7 @@ void forwarding(rule_t* rule, uint32_t psn, uint32_t type, uint32_t *data, int l
     log_write(id, "conn_id: %d, forwarding... psn: %d, type: %d, len: %d\n", id, psn,type, len);
 
     if(type == PACKET_TYPE_ACK) {
-        connection* conn = rule->ack_conn;
+        connection_t* conn = rule->ack_conn;
 
         uint8_t packet[2048];
         int size = build_eth_packet(
@@ -178,7 +184,7 @@ void forwarding(rule_t* rule, uint32_t psn, uint32_t type, uint32_t *data, int l
 
     } else if(type == PACKET_TYPE_DATA) {
         for(int i = 0; i < rule->out_conns_cnt; i++) {
-            connection* conn = rule->out_conns[i];
+            connection_t* conn = rule->out_conns[i];
 
             uint8_t packet[2048];
             int size = build_eth_packet(
@@ -201,17 +207,17 @@ void forwarding(rule_t* rule, uint32_t psn, uint32_t type, uint32_t *data, int l
     LOG_FUNC_EXIT(id);
 }
 
-int cache(rule_t* rule, uint32_t psn, uint32_t *data, int len, int packet_type) {
+int cache(rule_t* rule, uint32_t psn, uint32_t *data, int len, int packet_type, bool revert) {
     // 缓存数据
     for(int i = 0; i < len; i++) {
-        bcast_buffer[Idx(psn)].buffer[i] = data[i];
+        bcast_buffer[Idx(psn)].buffer[i] = revert ? ntohl(data[i]) : data[i];;
     }
     bcast_buffer[Idx(psn)].len = len;
     bcast_buffer[Idx(psn)].packet_type = packet_type;
     
     // 广播
     printf("broadcast... psn: %d\n", psn);
-    forwarding(rule, psn, PACKET_TYPE_DATA, data, len, packet_type);
+    forwarding(rule, psn, PACKET_TYPE_DATA, bcast_buffer[Idx(psn)].buffer, len, packet_type);
 }
 
 int aggregate(rule_t* rule, uint32_t psn, uint32_t *data, int len, int packet_type) {
@@ -235,7 +241,7 @@ int aggregate(rule_t* rule, uint32_t psn, uint32_t *data, int len, int packet_ty
             if (bcast_arrival_state[Idx(psn)] == 1) {
             } else {
                 bcast_arrival_state[Idx(psn)] = 1;
-                cache(rule, psn, agg_buffer[Idx(psn)].buffer, len, packet_type);
+                cache(rule, psn, agg_buffer[Idx(psn)].buffer, len, packet_type, false);
             }
         } else {
             // 向上传
@@ -332,7 +338,7 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
                     // 发送ACK
                     forwarding(rule, psn, PACKET_TYPE_ACK, NULL, 0, 0);
                     // 缓存模块
-                    cache(rule, psn, data, data_len, bth->opcode);
+                    cache(rule, psn, data, data_len, bth->opcode, true);
                 }
             }
         } else {
@@ -385,6 +391,7 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
                 // 收到ACK
                 if (psn == agg_psn[Idx(psn)]) {
                     // 计时器取消
+                    ts_buffer[rule->id][Idx(psn)] = 0;
                 }
             } else {
                 // NAK
@@ -434,7 +441,7 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
 void *background_receiving(void *arg) {
     int id = (int)(intptr_t)arg;
     printf("thread %d start...\n", id);
-    connection* conn = &conns[id];
+    connection_t* conn = &conns[id];
     
     pcap_t *handle = conn->handle;
 

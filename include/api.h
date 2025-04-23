@@ -65,26 +65,6 @@ struct iccl_communicator{
     union ibv_gid peer_gid;
 };
 
-#define PACKET_TYPE_DATA 0
-#define PACKET_TYPE_ACK 1
-#define PACKET_TYPE_NAK 2
-#define PAYLOAD_SIZE 1024
-
-typedef struct {
-    uint32_t seq;
-    uint32_t type;
-    // ...
-} MyHeader;
-
-typedef int32_t Payload[PAYLOAD_SIZE];
-
-typedef struct  {
-    MyHeader header;
-    Payload payload;
-} Packet; 
-
-void print_packet(const Packet *p);
-
 struct iccl_group *iccl_group_create(int group_id);
 int iccl_group_destroy(struct iccl_group *group);
 

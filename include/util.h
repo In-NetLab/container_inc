@@ -68,7 +68,27 @@ typedef struct {
     int ok;
 
     pcap_t *handle;
-} connection;
+} connection_t;
+
+#define PACKET_TYPE_DATA 0
+#define PACKET_TYPE_ACK 1
+#define PACKET_TYPE_NAK 2
+#define PAYLOAD_SIZE 1024
+
+typedef struct {
+    uint32_t seq;
+    uint32_t type;
+    // ...
+} my_header_t;
+
+typedef int32_t my_payload_t[PAYLOAD_SIZE];
+
+typedef struct  {
+    my_header_t header;
+    my_payload_t payload;
+} my_packet_t; 
+
+void print_packet(const my_packet_t *p);
 
 uint32_t get_ip(const char *ip_str);
 
@@ -78,7 +98,7 @@ void print_eth_header(int id, const eth_header_t *eth);
 void print_ipv4_header(int id, const ipv4_header_t *ip);
 void print_udp_header(int id, const udp_header_t *udp);
 void print_bth_header(int id, const bth_header_t *bth);
-void print_connection(int id, const connection *conn);
+void print_connection(int id, const connection_t *conn);
 
 uint16_t ipv4_checksum(const ipv4_header_t *ip);
 int is_ipv4_checksum_valid(const ipv4_header_t *ip);

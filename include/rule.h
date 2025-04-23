@@ -22,9 +22,9 @@ typedef struct {
     int direction;
 
     // pcap_t *ack_handle; // 回复ACK的端口 相当于入端口
-    connection *ack_conn;
+    connection_t *ack_conn;
     // pcap_t *out_handles[MAX_PORT_NUM]; // 相当于交换机出端口
-    connection *out_conns[MAX_PORT_NUM];
+    connection_t *out_conns[MAX_PORT_NUM];
     int out_conns_cnt;
 } rule_t;
 

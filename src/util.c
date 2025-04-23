@@ -11,6 +11,24 @@ uint32_t get_ip(const char *ip_str) {
     return addr.s_addr;
 }
 
+void print_packet(const my_packet_t *p) {
+    printf("===============================================\n");
+    if (!p) {
+        printf("Packet is NULL!\n");
+        return;
+    }
+
+    printf("Packet Header:\n");
+    printf("  seq:  %u (0x%08X)\n", p->header.seq, p->header.seq);
+    printf("  type: %u (0x%08X)\n", p->header.type, p->header.type);
+
+    printf("Packet Payload:\n");
+    for (int i = 0; i < PAYLOAD_SIZE; i++) {
+        printf("  payload[%d]: %d (0x%08X)\n", i, ntohl(p->payload[i]), p->payload[i]);
+    }
+    printf("===============================================\n");
+}
+
 // 打印 MAC 地址
 void print_mac(int id, const char *prefix, const uint8_t mac[6]) {
     log_write(id, "%s%02X:%02X:%02X:%02X:%02X:%02X\n", prefix,
@@ -71,7 +89,7 @@ void print_bth_header(int id, const bth_header_t *bth) {
     log_write(id, "  APSN:            %u\n", ntohl(bth->apsn) & 0x00FFFFFF);
 }
 
-void print_connection(int id, const connection *conn) {
+void print_connection(int id, const connection_t *conn) {
     log_write(id, "==== Connection Info ====\n");
     log_write(id, "  Device:           %s\n", conn->device);
     print_mac(id, "  My MAC:           ", conn->my_mac);
@@ -181,7 +199,7 @@ uint32_t compute_icrc(int id, const char* eth_packet) {
 }
 
 int is_icrc_valid(int id, const char* packet) {
-    uint32_t* icrc = (uint32_t*)(packet + sizeof(eth_header_t) + sizeof(ipv4_header_t) + sizeof(udp_header_t) + sizeof(bth_header_t) + ICCL_HEADER_LEN + sizeof(Packet));
+    uint32_t* icrc = (uint32_t*)(packet + sizeof(eth_header_t) + sizeof(ipv4_header_t) + sizeof(udp_header_t) + sizeof(bth_header_t) + ICCL_HEADER_LEN + sizeof(my_packet_t));
 
     uint32_t mycrc = compute_icrc(id, packet);
 
@@ -197,8 +215,7 @@ void print_all(int id, const char* packet) {
     len += sizeof(ipv4_header_t);
     len += sizeof(udp_header_t);
     len += sizeof(bth_header_t);
-    len += ICCL_HEADER_LEN;
-    len += sizeof(Packet);
+    len += sizeof(my_packet_t);
     len += 4;
     // for(int i = 0; i < len; i++) {
     //     printf("%02x ", (unsigned char)packet[i]);
