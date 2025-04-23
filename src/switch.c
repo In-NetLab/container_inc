@@ -13,6 +13,8 @@
 #include "log.h"
 #include "rule.h"
 
+#include "topo_parser.h"
+
 // =========================== 配置信息(yaml or 控制器, 暂时硬编码) =======================
 #define N 16  // 交换机上各个数组的长度
 #define FAN_IN 2  // 交换机子节点个数
@@ -62,39 +64,42 @@ rule_table_t table;
 
 
 // =============================== helper ===============================
-void init_all() {
+void init_all(int switch_id) {
+    int count = parse_config("../config/topology-1.yaml", 10, &root, switch_id, conns);
+    printf("root: %d\n", root);
+    
     // 此处修改连接配置
-    root = 1;
-    uint8_t peer_macs[FAN_IN + 1][6] = {
-        {0x52, 0x54, 0x00, 0x52, 0x5d, 0xae},
-        {0x52, 0x54, 0x00, 0x5e, 0x4c, 0xb0},
-        {}
-    };
-    char *peer_ips[FAN_IN + 1] = {
-        "10.50.183.49",
-        "10.50.183.102",
-        ""
-    };
+    // root = 1;
+    // uint8_t peer_macs[FAN_IN + 1][6] = {
+    //     {0x52, 0x54, 0x00, 0x52, 0x5d, 0xae},
+    //     {0x52, 0x54, 0x00, 0x5e, 0x4c, 0xb0},
+    //     {}
+    // };
+    // char *peer_ips[FAN_IN + 1] = {
+    //     "10.50.183.49",
+    //     "10.50.183.102",
+    //     ""
+    // };
     for(int i = 0; i < FAN_IN + 1; i++) {
         if(root == 1 && i == FAN_IN)
             continue;
         
         memcpy(conns[i].device, "ens3", 4);
         
-        uint8_t my_mac[6] = {0x52, 0x54, 0x00, 0x46, 0x57, 0x82};
-        // uint8_t peer_mac[6] = {0x52, 0x54, 0x00, 0xdf, 0x0c, 0x28};
-        memcpy(conns[i].my_mac, my_mac, 6);
-        memcpy(conns[i].peer_mac, peer_macs[i], 6);
+        // uint8_t my_mac[6] = {0x52, 0x54, 0x00, 0x46, 0x57, 0x82};
+        // // uint8_t peer_mac[6] = {0x52, 0x54, 0x00, 0xdf, 0x0c, 0x28};
+        // memcpy(conns[i].my_mac, my_mac, 6);
+        // memcpy(conns[i].peer_mac, peer_macs[i], 6);
 
-        conns[i].my_ip = get_ip("10.50.183.69");
-        // conns[i].peer_ip = get_ip("10.50.183.146");
-        conns[i].peer_ip = get_ip(peer_ips[i]);
+        // conns[i].my_ip = get_ip("10.50.183.69");
+        // // conns[i].peer_ip = get_ip("10.50.183.146");
+        // conns[i].peer_ip = get_ip(peer_ips[i]);
 
-        conns[i].my_port = 23333 + i;
-        conns[i].peer_port = 4791;
+        // conns[i].my_port = 23333 + i;
+        // conns[i].peer_port = 4791;
 
-        conns[i].my_qp = 28 + i;
-        conns[i].peer_qp = 0x11; // 待填
+        // conns[i].my_qp = 28 + i;
+        // conns[i].peer_qp = 0x11; // 待填
         
         conns[i].psn = 0;
         conns[i].msn = 0;
@@ -103,21 +108,21 @@ void init_all() {
         print_connection(i, &conns[i]);
 
         char errbuf[PCAP_ERRBUF_SIZE];
-        // handles[i] = pcap_open_live(conns[i].device, BUFSIZ, 1, 1, errbuf);
         conns[i].handle = pcap_create(conns[i].device, errbuf);
         pcap_set_snaplen(conns[i].handle, BUFSIZ);
         pcap_set_promisc(conns[i].handle, 1);
         pcap_set_timeout(conns[i].handle, 1);  // 1ms timeout
         pcap_set_immediate_mode(conns[i].handle, 1);
-        pcap_activate(conns[i].handle);
-
+        if (pcap_activate(conns[i].handle) != 0) {
+            fprintf(stderr, "pcap_activate failed: %s\n", pcap_geterr(conns[i].handle));
+            return;
+        }
         if (conns[i].handle == NULL) {
             fprintf(stderr, "Could not open device: %s, err: %s\n", conns[i].device, errbuf);
             return;
         }
     }
-    // gender = 1;               
-    // ip_p = "10.50.183.146";
+    
     memset(arrival_state, 0, sizeof(arrival_state));
     memset(ts_buffer, 0, sizeof(ts_buffer));
     memset(r_arrival_state, 0, sizeof(r_arrival_state));
@@ -137,8 +142,8 @@ void init_all() {
             continue;
 
         rule_t rule;
-        rule.src_ip = get_ip(peer_ips[i]);
-        rule.dst_ip = get_ip("10.50.183.69");
+        rule.src_ip = conns[i].peer_ip;
+        rule.dst_ip = conns[i].my_ip;
         rule.id = i;
         rule.direction = DIR_UP;
         rule.ack_conn = &conns[i];
@@ -520,13 +525,22 @@ void *background_receiving(void *arg) {
 
 
 
-int main() {
+int main(int argc, char *argv[]) {
+    int switch_id;
+    if(argc != 2) {
+        printf("default switch id: 0\n");
+        switch_id = 0;
+    } else {
+        switch_id = atoi(argv[1]);
+    }
+    
+
     if (log_init("/home/ubuntu/switch.log") != 0) {
         fprintf(stderr, "Failed to open log file\n");
         return 1;
     }
 
-    init_all();
+    init_all(switch_id);
 
     pthread_t receivers[FAN_IN];
     pthread_t polling;

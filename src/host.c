@@ -1,6 +1,7 @@
 #include "api.h"
 #include "util.h"
 #include <assert.h>
+#include "topo_parser.h"
 
 // 模拟上层应用数据
 #define IN_DATA_LEN 1024000
@@ -19,13 +20,17 @@ void print_cost_time(const char * prefix) {
     printf("%s, Time taken: %f seconds\n", prefix, elapsed_time);
 }
 
-void init_all(int group_id) {
+void init_all(int host_id) {
     // client
     gender = 0;             
-    ip_p = "10.50.183.69"; 
+    // ip_p = "10.50.183.69"; 
+    ip_p = malloc(20);
+    if(get_switch_ip("../config/topology-1.yaml", host_id, ip_p) != 0) {
+        printf("error: get switch ip err\n");
+    }
     // 初始化上层应用数据
     for(int i = 0; i < IN_DATA_LEN; i++) {
-        in_data[i] = i * group_id;
+        in_data[i] = i * host_id;
     }
 }
 
