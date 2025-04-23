@@ -1,6 +1,11 @@
+#ifndef UTIL_H
+#define UTIL_H
+
+
 #include <stdint.h>
 #include <arpa/inet.h>
 #include <sys/time.h>
+#include <pcap.h>
 
 typedef struct {
     uint8_t  dst_mac[6];
@@ -61,6 +66,8 @@ typedef struct {
     uint32_t msn;
 
     int ok;
+
+    pcap_t *handle;
 } connection;
 
 uint32_t get_ip(const char *ip_str);
@@ -91,3 +98,6 @@ uint32_t build_eth_packet
 );
 
 uint64_t get_now_ts();
+
+
+#endif // UTIL_H

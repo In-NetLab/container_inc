@@ -19,6 +19,9 @@ void print_cost_time(const char * prefix) {
 }
 
 void init_all(int group_id) {
+    // client
+    gender = 0;             
+    ip_p = "10.50.183.69"; 
     // 初始化上层应用数据
     for(int i = 0; i < IN_DATA_LEN; i++) {
         in_data[i] = i * group_id;
@@ -133,9 +136,6 @@ int main(int argc, char *argv[]) {
         printf("need 1 params now\n");
     }
     int id = atoi(argv[1]);
-    // client
-    gender = 0;             
-    ip_p = "10.50.183.69"; 
 
     init_all(id);
 
