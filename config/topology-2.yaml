@@ -24,24 +24,24 @@ switches:
         peer_port: 4791
         peer_qp: 17
 
-      - up: false
-        host_id: 3
-        my_ip: "10.50.183.142"
-        my_mac: "52:54:00:e1:69:55"
-        my_port: 23335
-        my_qp: 30
-        peer_ip: "10.50.183.156"
-        peer_mac: "52:54:00:11:64:2a"
-        peer_port: 4791
-        peer_qp: 17
+      # - up: false
+      #   host_id: 3
+      #   my_ip: "10.50.183.142"
+      #   my_mac: "52:54:00:e1:69:55"
+      #   my_port: 23335
+      #   my_qp: 30
+      #   peer_ip: "10.50.183.156"
+      #   peer_mac: "52:54:00:11:64:2a"
+      #   peer_port: 4791
+      #   peer_qp: 17
 
-      - up: false
-        host_id: 4
-        my_ip: "10.50.183.142"
-        my_mac: "52:54:00:e1:69:55"
-        my_port: 23336
-        my_qp: 31
-        peer_ip: "10.50.183.226"
-        peer_mac: "52:54:00:65:1a:39"
-        peer_port: 4791
-        peer_qp: 17
+      # - up: false
+      #   host_id: 4
+      #   my_ip: "10.50.183.142"
+      #   my_mac: "52:54:00:e1:69:55"
+      #   my_port: 23336
+      #   my_qp: 31
+      #   peer_ip: "10.50.183.226"
+      #   peer_mac: "52:54:00:65:1a:39"
+      #   peer_port: 4791
+      #   peer_qp: 17

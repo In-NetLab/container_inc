@@ -387,7 +387,10 @@ uint32_t build_eth_packet
     // 5. aeth
     if(type == PACKET_TYPE_ACK || type == PACKET_TYPE_NAK){
         aeth_t* aeth = (aeth_t*)(dst_packet + sizeof(eth_header_t) + sizeof(ipv4_header_t) + sizeof(udp_header_t) + sizeof(bth_header_t));
-        aeth->syn_msn = htonl(msn | 0x1f000000);
+        if(type == PACKET_TYPE_ACK)
+            aeth->syn_msn = htonl(msn | 0x1f000000);
+        else if(type == PACKET_TYPE_NAK)
+            aeth->syn_msn = htonl(msn | 0x60000000); //高8位: 0110 0000 => psn seq error
     }
 
     // 6. data
