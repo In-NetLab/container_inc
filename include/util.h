@@ -73,7 +73,8 @@ typedef struct {
 #define PACKET_TYPE_DATA 0
 #define PACKET_TYPE_ACK 1
 #define PACKET_TYPE_NAK 2
-#define PAYLOAD_SIZE 1024
+#define PAYLOAD_LEN 8192 // 元素个数
+#define ELEMENT_SIZE sizeof(int32_t)
 
 typedef struct {
     uint32_t seq;
@@ -81,7 +82,7 @@ typedef struct {
     // ...
 } my_header_t;
 
-typedef int32_t my_payload_t[PAYLOAD_SIZE];
+typedef int32_t my_payload_t[PAYLOAD_LEN];
 
 typedef struct  {
     my_header_t header;
@@ -119,5 +120,6 @@ uint32_t build_eth_packet
 
 uint64_t get_now_ts();
 
-
+void init_crc32_table();
+uint32_t crc32(const void *data, size_t length);
 #endif // UTIL_H

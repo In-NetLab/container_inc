@@ -23,8 +23,8 @@ void print_packet(const my_packet_t *p) {
     printf("  type: %u (0x%08X)\n", p->header.type, p->header.type);
 
     printf("Packet Payload:\n");
-    for (int i = 0; i < PAYLOAD_SIZE; i++) {
-        printf("  payload[%d]: %d (0x%08X)\n", i, ntohl(p->payload[i]), p->payload[i]);
+    for (int i = 0; i < PAYLOAD_LEN; i++) {
+        printf("  payload[%d]: %d (0x%08X)\n", i, (p->payload[i]), p->payload[i]);
     }
     printf("===============================================\n");
 }
@@ -137,27 +137,114 @@ int is_ipv4_checksum_valid(const ipv4_header_t *ip) {
     return (computed == ntohs(ip->checksum));
 }
 
-uint32_t crc32(const void *data, size_t length) {
-    const uint8_t *bytes = (const uint8_t *)data;
-    uint32_t crc = 0xFFFFFFFF;  // 初始值
-    
-    for (size_t i = 0; i < length; i++) {
-        crc ^= bytes[i];  // 与当前字节异或
-        
-        // 处理每个字节的8位
+
+#define POLY 0xEDB88320
+uint32_t crc32_table[8][256];  // 8 个表，每个 256 项
+
+void init_crc32_table() {
+    for (uint32_t i = 0; i < 256; i++) {
+        uint32_t crc = i;
         for (int j = 0; j < 8; j++) {
-            if (crc & 1) {
-                // 如果最低位是1，右移并与多项式异或
-                crc = (crc >> 1) ^ 0xEDB88320;
-            } else {
-                // 否则只右移
-                crc = crc >> 1;
-            }
+            crc = (crc >> 1) ^ (crc & 1 ? POLY : 0);
+        }
+        crc32_table[0][i] = crc;
+    }
+
+    // 派生后面的7张表
+    for (int t = 1; t < 8; t++) {
+        for (int i = 0; i < 256; i++) {
+            crc32_table[t][i] = (crc32_table[t - 1][i] >> 8) ^ crc32_table[0][crc32_table[t - 1][i] & 0xFF];
         }
     }
-    
-    return crc ^ 0xFFFFFFFF;  // 最终异或
 }
+uint32_t crc32(const void *data, size_t length) {
+    const uint8_t *buf = (const uint8_t *)data;
+    uint32_t crc = 0xFFFFFFFF;
+
+    // 处理按8字节对齐的数据块
+    while (length >= 8) {
+        uint8_t b0 = buf[0] ^ (crc & 0xFF);
+        uint8_t b1 = buf[1] ^ ((crc >> 8) & 0xFF);
+        uint8_t b2 = buf[2] ^ ((crc >> 16) & 0xFF);
+        uint8_t b3 = buf[3] ^ ((crc >> 24) & 0xFF);
+        uint8_t b4 = buf[4];
+        uint8_t b5 = buf[5];
+        uint8_t b6 = buf[6];
+        uint8_t b7 = buf[7];
+
+        crc =
+            crc32_table[0][b7] ^
+            crc32_table[1][b6] ^
+            crc32_table[2][b5] ^
+            crc32_table[3][b4] ^
+            crc32_table[4][b3] ^
+            crc32_table[5][b2] ^
+            crc32_table[6][b1] ^
+            crc32_table[7][b0];
+
+        buf += 8;
+        length -= 8;
+    }
+
+    // 处理剩余的字节
+    while (length--) {
+        crc = (crc >> 8) ^ crc32_table[0][(crc ^ *buf++) & 0xFF];
+    }
+
+    return crc ^ 0xFFFFFFFF;
+}
+
+
+
+// uint32_t crc32_table[256];
+
+// void init_crc32_table() {
+//     for (uint32_t i = 0; i < 256; i++) {
+//         uint32_t c = i;
+//         for (int j = 0; j < 8; j++) {
+//             if (c & 1) {
+//                 c = (c >> 1) ^ 0xEDB88320;
+//             } else {
+//                 c = c >> 1;
+//             }
+//         }
+//         crc32_table[i] = c;
+//     }
+// }
+// uint32_t crc32(const void *data, size_t length) {
+//     const uint8_t *bytes = (const uint8_t *)data;
+//     uint32_t crc = 0xFFFFFFFF;
+
+//     for (size_t i = 0; i < length; i++) {
+//         uint8_t index = (crc ^ bytes[i]) & 0xFF;
+//         crc = (crc >> 8) ^ crc32_table[index];
+//     }
+
+//     return crc ^ 0xFFFFFFFF;
+// }
+
+
+// uint32_t crc32(const void *data, size_t length) {
+//     const uint8_t *bytes = (const uint8_t *)data;
+//     uint32_t crc = 0xFFFFFFFF;  // 初始值
+    
+//     for (size_t i = 0; i < length; i++) {
+//         crc ^= bytes[i];  // 与当前字节异或
+        
+//         // 处理每个字节的8位
+//         for (int j = 0; j < 8; j++) {
+//             if (crc & 1) {
+//                 // 如果最低位是1，右移并与多项式异或
+//                 crc = (crc >> 1) ^ 0xEDB88320;
+//             } else {
+//                 // 否则只右移
+//                 crc = crc >> 1;
+//             }
+//         }
+//     }
+    
+//     return crc ^ 0xFFFFFFFF;  // 最终异或
+// }
 
 // 计算 RoCEv2 ICRC
 uint32_t compute_icrc(int id, const char* eth_packet) {
@@ -165,7 +252,7 @@ uint32_t compute_icrc(int id, const char* eth_packet) {
     ipv4_header_t* iip = (ipv4_header_t*)(eth_packet + sizeof(eth_header_t));
     int len = ntohs(iip->total_length) - 4; // 减去 icrc
 
-    char pack[2048];
+    char pack[5555];
     memcpy(pack + 8, eth_packet + sizeof(eth_header_t), len);
     len += 8;
     for(int i = 0; i < 8; i++) {
@@ -308,7 +395,7 @@ uint32_t build_eth_packet
         unsigned char* d = (unsigned char*)(dst_packet + sizeof(eth_header_t) + sizeof(ipv4_header_t) + sizeof(udp_header_t) + sizeof(bth_header_t));
         // memcpy(d, data, data_len);
         for(int i = 0; i < data_len / 4; i++) {
-            ((uint32_t*)d)[i] = htonl(((uint32_t*)data)[i]);
+            ((uint32_t*)d)[i] = (((uint32_t*)data)[i]);
         }
     }
 

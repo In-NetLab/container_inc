@@ -1,0 +1,47 @@
+switches:
+  - id: 0
+    root: true
+    connections:
+      - up: false
+        host_id: 1
+        my_ip: "10.50.183.142"
+        my_mac: "52:54:00:e1:69:55"
+        my_port: 23333
+        my_qp: 28
+        peer_ip: "10.50.183.97"
+        peer_mac: "52:54:00:e6:3e:8a"
+        peer_port: 4791
+        peer_qp: 17
+
+      - up: false
+        host_id: 2
+        my_ip: "10.50.183.142"
+        my_mac: "52:54:00:e1:69:55"
+        my_port: 23334
+        my_qp: 29
+        peer_ip: "10.50.183.30"
+        peer_mac: "52:54:00:58:d3:03"
+        peer_port: 4791
+        peer_qp: 17
+
+      - up: false
+        host_id: 3
+        my_ip: "10.50.183.142"
+        my_mac: "52:54:00:e1:69:55"
+        my_port: 23335
+        my_qp: 30
+        peer_ip: "10.50.183.156"
+        peer_mac: "52:54:00:11:64:2a"
+        peer_port: 4791
+        peer_qp: 17
+
+      - up: false
+        host_id: 4
+        my_ip: "10.50.183.142"
+        my_mac: "52:54:00:e1:69:55"
+        my_port: 23336
+        my_qp: 31
+        peer_ip: "10.50.183.226"
+        peer_mac: "52:54:00:65:1a:39"
+        peer_port: 4791
+        peer_qp: 17

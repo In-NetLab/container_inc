@@ -4,22 +4,22 @@ switches:
     connections:
       - up: false
         host_id: 1
-        my_ip: "10.50.183.69"
-        my_mac: "52:54:00:46:57:82"
+        my_ip: "10.50.183.216"
+        my_mac: "52:54:00:a6:e9:3a"
         my_port: 23333
         my_qp: 28
-        peer_ip: "10.50.183.49"
-        peer_mac: "52:54:00:52:5d:ae"
+        peer_ip: "10.50.183.186"
+        peer_mac: "52:54:00:44:8e:a8"
         peer_port: 4791
         peer_qp: 17
 
       - up: false
         host_id: 2
-        my_ip: "10.50.183.69"
-        my_mac: "52:54:00:46:57:82"
+        my_ip: "10.50.183.216"
+        my_mac: "52:54:00:a6:e9:3a"
         my_port: 23334
         my_qp: 29
-        peer_ip: "10.50.183.102"
-        peer_mac: "52:54:00:5e:4c:b0"
+        peer_ip: "10.50.183.36"
+        peer_mac: "52:54:00:25:ba:cf"
         peer_port: 4791
         peer_qp: 17
