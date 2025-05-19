@@ -1,0 +1,97 @@
+switches:
+  - id: 1
+    root: true
+    connections:
+      - up: false
+        host_id: 9998
+        my_ip: "10.50.183.11"
+        my_mac: "52:54:00:79:05:f1"
+        my_port: 4791
+        my_qp: 28
+        peer_ip: "10.50.183.114"
+        peer_mac: "52:54:00:c2:11:88"
+        peer_port: 4791
+        peer_qp: 17
+
+      - up: false
+        host_id: 9999
+        my_ip: "10.50.183.11"
+        my_mac: "52:54:00:79:05:f1"
+        my_port: 4791
+        my_qp: 29
+        peer_ip: "10.50.183.98"
+        peer_mac: "52:54:00:e3:c7:12"
+        peer_port: 4791
+        peer_qp: 17
+      
+  - id: 2
+    root: false
+    connections:
+      - up: false
+        host_id: 1
+        my_ip: "10.50.183.114"
+        my_mac: "52:54:00:c2:11:88"
+        my_port: 23333
+        my_qp: 28
+        peer_ip: "10.50.183.250"
+        peer_mac: "52:54:00:cd:f4:99"
+        peer_port: 4791
+        peer_qp: 17
+
+      - up: false
+        host_id: 2
+        my_ip: "10.50.183.114"
+        my_mac: "52:54:00:c2:11:88"
+        my_port: 23334
+        my_qp: 29
+        peer_ip: "10.50.183.8"
+        peer_mac: "52:54:00:16:fd:30"
+        peer_port: 4791
+        peer_qp: 17
+
+      - up: true
+        host_id: 9999
+        my_ip: "10.50.183.114"
+        my_mac: "52:54:00:c2:11:88"
+        my_port: 4791
+        my_qp: 17
+        peer_ip: "10.50.183.11"
+        peer_mac: "52:54:00:79:05:f1"
+        peer_port: 4791
+        peer_qp: 28
+
+  - id: 3
+    root: false
+    connections:
+      - up: false
+        host_id: 3
+        my_ip: "10.50.183.98"
+        my_mac: "52:54:00:e3:c7:12"
+        my_port: 23335
+        my_qp: 30
+        peer_ip: "10.50.183.125"
+        peer_mac: "52:54:00:b5:1f:cc"
+        peer_port: 4791
+        peer_qp: 17
+
+      - up: false
+        host_id: 4
+        my_ip: "10.50.183.98"
+        my_mac: "52:54:00:e3:c7:12"
+        my_port: 23336
+        my_qp: 31
+        peer_ip: "10.50.183.221"
+        peer_mac: "52:54:00:5c:de:f2"
+        peer_port: 4791
+        peer_qp: 17
+
+      - up: true
+        host_id: 9999
+        my_ip: "10.50.183.98"
+        my_mac: "52:54:00:e3:c7:12"
+        my_port: 4791
+        my_qp: 17
+        peer_ip: "10.50.183.11"
+        peer_mac: "52:54:00:79:05:f1"
+        peer_port: 4791
+        peer_qp: 29

@@ -74,7 +74,7 @@ typedef struct {
 #define PACKET_TYPE_ACK 1
 #define PACKET_TYPE_NAK 2
 #define PACKET_TYPE_DATA_SINGLE 3
-#define PAYLOAD_LEN 8192 // 元素个数
+#define PAYLOAD_LEN 1024 // 元素个数
 #define ELEMENT_SIZE sizeof(int32_t)
 
 typedef struct {

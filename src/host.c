@@ -4,12 +4,12 @@
 #include "topo_parser.h"
 
 // 模拟上层应用数据
-#define IN_DATA_LEN 10240000
+#define IN_DATA_LEN 102400
 int32_t in_data[IN_DATA_LEN];
 int32_t dst_data[IN_DATA_LEN];
 
 #define PACKET_NUM IN_DATA_LEN / PAYLOAD_LEN
-#define WINDOW_SIZE 16
+#define WINDOW_SIZE 2
 
 clock_t start_time;
 
@@ -25,7 +25,7 @@ void init_all(int host_id) {
     gender = 0;             
     // ip_p = "10.50.183.69"; 
     ip_p = malloc(20);
-    if(get_switch_ip("../config/topology-2.yaml", host_id, ip_p) != 0) {
+    if(get_switch_ip("../config/topology-tree.yaml", host_id, ip_p) != 0) {
         printf("error: get switch ip err\n");
     }
     // 初始化上层应用数据
@@ -123,7 +123,7 @@ void allreduce(struct iccl_communicator *comm, int32_t* src_data, int len, int32
                     //     send_num++;
                     // }
                 } else {
-                    printf("what????????????????????????????\n");
+                    printf("what???? wc status: %d, opcode: %d\n", tmp->status, tmp->opcode);
                 }
 
             }
