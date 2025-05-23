@@ -19,15 +19,15 @@
 2. `src/switch.c` `init_all()` 和 `src/host.c` `init_all()` 中修改yaml文件路径
 
 ### 编译
-    ``` bash
-    mkdir build && cd build
-    cmake ..
-    make
-    ```
+``` bash
+mkdir build && cd build
+cmake ..
+make
+```
 ### 运行
-    ``` bash
-    cd ..
-    sudo build/switch 0 # 终端1
-    build/host 1 # 终端2
-    build/host 2 # 终端3
-    ```
+``` bash
+cd ..
+sudo build/switch 0 # 终端1
+build/host 1 # 终端2
+build/host 2 # 终端3
+```
