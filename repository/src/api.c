@@ -34,7 +34,7 @@ struct inccl_group *inccl_group_create(int world_size, int rank, const char *mas
     if(rank == 0){
         // rank0
         //group->controller_ip = getenv("CONTROLLER_IP");
-        group->controller_ip = "10.215.8.149";
+        group->controller_ip = "10.215.8.38";
         printf("controller ip: %s \n", group->controller_ip);
         group->group_fd_list = (int *)calloc(world_size, sizeof(int));
         uint32_t *group_ip_list = (uint32_t *)calloc(world_size, sizeof(uint32_t));
@@ -221,6 +221,10 @@ struct inccl_communicator *inccl_communicator_create(struct inccl_group *group, 
     uint32_t switch_qp_num;
     printf("parse yaml\n");
     get_switch_info("/home/ubuntu/topology.yaml", group->rank, &switch_ip, &switch_qp_num);
+
+    // in practice, need to reach an agreement with switch to determine the window size.
+    comm->window_size = WINDOW_SIZE;
+
     // connect qp
     union ibv_gid switch_gid = group->local_gid;
     memcpy(switch_gid.raw+12,&switch_ip,4);
@@ -284,3 +288,165 @@ struct inccl_communicator *inccl_communicator_create(struct inccl_group *group, 
 
 
 int inccl_communicator_destroy(struct inccl_communicator *comm);
+
+// idx is the index of the message
+static int post_send(struct inccl_communicator *comm, int32_t* src_data, int idx, enum ibv_wr_opcode opcode) {
+    struct ibv_send_wr wr;
+    struct ibv_sge send_sge;
+    struct ibv_send_wr *send_bad_wr;
+
+    int *send_payload = (int *)(comm->send_payload + idx * PAYLOAD_COUNT * sizeof(int32_t));
+
+    for(int i=0;i<PAYLOAD_COUNT;++i){
+        send_payload[i] = htonl((src_data + idx * PAYLOAD_COUNT)[i]);
+    }
+    
+    //memcpy(send_payload, src_data + idx * PAYLOAD_COUNT, PAYLOAD_COUNT * sizeof(uint32_t));
+
+    memset(&send_sge, 0, sizeof(send_sge));
+    send_sge.addr = (uintptr_t)(comm->send_payload + idx * PAYLOAD_COUNT * sizeof(int32_t));
+    send_sge.length = PAYLOAD_COUNT * sizeof(int32_t);
+    send_sge.lkey = comm->mr_send_payload->lkey;
+    memset(&wr, 0, sizeof(wr));
+    wr.next = NULL;
+    wr.wr_id = idx;
+    wr.sg_list = &send_sge;
+    wr.num_sge = 1;
+    wr.opcode = opcode ;
+    wr.send_flags = IBV_SEND_SIGNALED; // only to check the ack reflection, no use
+
+        
+    if(opcode == IBV_WR_RDMA_WRITE){
+        wr.wr.rdma.remote_addr = (uintptr_t)(comm->receive_payload + idx * PAYLOAD_COUNT * sizeof(int32_t));;
+        wr.wr.rdma.rkey = comm->mr_receive_payload->rkey;
+    }
+
+    return ibv_post_send(comm->qp, &wr, &send_bad_wr);
+    
+    
+}
+
+// len is the number of elements of int
+void inccl_allreduce_sendrecv(struct inccl_communicator *comm, int32_t* src_data, uint32_t len, int32_t* dst_data) {
+    int receive_num = 0;
+    int send_num = 0;
+    int message_num = len / PAYLOAD_COUNT; // message_num is 4 times the rdma packet number
+    
+    struct ibv_recv_wr rr;
+    struct ibv_sge receive_sge;
+    struct ibv_recv_wr *receive_bad_wr;
+           
+    // post receive
+    for(int i = 0; i < message_num; i++) {
+        memset(&receive_sge, 0, sizeof(receive_sge));
+        receive_sge.addr = (uintptr_t)(comm->receive_payload + i * PAYLOAD_COUNT * sizeof(int32_t));
+        receive_sge.length = PAYLOAD_COUNT * sizeof(int32_t);
+        receive_sge.lkey = comm->mr_receive_payload->lkey;
+        memset(&rr, 0, sizeof(rr));
+        rr.next = NULL;
+        rr.wr_id = i;
+        rr.sg_list = &receive_sge;
+        rr.num_sge = 1;
+        int ret = ibv_post_recv(comm->qp, &rr, &receive_bad_wr);
+        printf("i: %d, post recv ret %d\n", i, ret);
+    }
+
+    // post send
+    for(int i = 0; i < comm->window_size/(MESSAGE_SIZE); i++) {
+        post_send(comm, src_data, i, IBV_WR_SEND);
+        send_num++;
+    }
+
+    // using poll, which will be replaced by event + poll
+    struct ibv_wc *wc = (struct ibv_wc *)malloc(sizeof(struct ibv_wc)*message_num);
+    while(receive_num != message_num) {
+        int result = ibv_poll_cq(comm->cq, message_num, wc);
+        if(result > 0) {
+            // printf("\n");
+            for(int i = 0; i < result; i++){
+                struct ibv_wc *tmp = wc + i;
+                // printf("tmp->status %d\n", tmp->status);
+                // printf("tmp->opcode %d\n", tmp->opcode);
+
+                if(tmp->status==IBV_WC_SUCCESS && tmp->opcode==IBV_WC_RECV) {
+                    printf("receive success\n");
+
+                    uint64_t idx = tmp->wr_id;
+                    int *pack = (int *)(comm->receive_payload + idx * PAYLOAD_COUNT * sizeof(int32_t));
+
+                    for(int j = 0; j <PAYLOAD_COUNT; ++j){
+                        (dst_data + receive_num * PAYLOAD_COUNT)[j] = ntohl(pack[j]);
+                    }
+
+                    //memcpy(dst_data + receive_num * PAYLOAD_COUNT, pack, PAYLOAD_COUNT * sizeof(int32_t));
+                    receive_num++;
+
+                    if(send_num < message_num) {
+                        post_send(comm, src_data, send_num, IBV_WR_SEND);
+                        send_num++;
+                    }
+                } else if(tmp->status==IBV_WC_SUCCESS) {
+                    printf("send success\n");
+                    // if(send_num < message_num) {
+                    //     post_send(comm, src_data, send_num);
+                    //     send_num++;
+                    // }
+                } else {
+                    printf("what???? wc status: %d, opcode: %d\n", tmp->status, tmp->opcode);
+                }
+
+            }
+        }
+    }
+}
+
+void inccl_allreduce_write(struct inccl_communicator *comm, int32_t* src_data, uint32_t len, int32_t* dst_data) {
+    int receive_num = 0;
+    int send_num = 0;
+    int message_num = len / PAYLOAD_COUNT; // message_num is 4 times the rdma packet number
+
+    for(int i = 0; i < comm->window_size/(MESSAGE_SIZE); i++) {
+        post_send(comm, src_data, i, IBV_WR_RDMA_WRITE);
+        send_num++;
+    }
+
+    struct ibv_wc *wc = (struct ibv_wc *)malloc(sizeof(struct ibv_wc)*message_num);
+    while(receive_num != message_num) {
+        int result = ibv_poll_cq(comm->cq, message_num, wc);
+        if(result > 0) {
+            for(int i = 0; i < result; i++){
+                struct ibv_wc *tmp = wc + i;
+                // printf("tmp->status %d\n", tmp->status);
+                // printf("tmp->opcode %d\n", tmp->opcode);
+
+                if(tmp->status==IBV_WC_SUCCESS && tmp->opcode==IBV_WC_RDMA_WRITE) {
+                    printf("receive success\n");
+
+                    uint64_t idx = tmp->wr_id;
+                    int *pack = (int *)(comm->receive_payload + idx * PAYLOAD_COUNT * sizeof(int32_t));
+
+                    for(int j = 0; j <PAYLOAD_COUNT; ++j){
+                        (dst_data + receive_num * PAYLOAD_COUNT)[j] = ntohl(pack[j]);
+                    }
+
+                    //memcpy(dst_data + receive_num * PAYLOAD_COUNT, pack, PAYLOAD_COUNT * sizeof(int32_t));
+                    receive_num++;
+
+                    if(send_num < message_num) {
+                        post_send(comm, src_data, send_num, IBV_WR_RDMA_WRITE);
+                        send_num++;
+                    }
+                } else if(tmp->status==IBV_WC_SUCCESS) {
+                    printf("send success\n");
+                    // if(send_num < message_num) {
+                    //     post_send(comm, src_data, send_num);
+                    //     send_num++;
+                    // }
+                } else {
+                    printf("what???? wc status: %d, opcode: %d\n", tmp->status, tmp->opcode);
+                }
+
+            }
+        }
+    }
+}

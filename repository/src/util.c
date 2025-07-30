@@ -335,12 +335,14 @@ uint32_t build_eth_packet
     uint32_t src_ip, uint32_t dst_ip,
     uint16_t src_port, uint16_t dst_port,
     uint32_t qp, uint32_t psn, 
-    uint32_t msn, int packet_type
+    uint32_t msn, int packet_type, const uint8_t *reth
 ) {
     // clock_t start = clock();
     uint16_t total_len = sizeof(eth_header_t) + sizeof(ipv4_header_t) + sizeof(udp_header_t) + sizeof(bth_header_t) + data_len + 4; // 4 为icrc
     if(type == PACKET_TYPE_ACK || type == PACKET_TYPE_NAK)
         total_len += sizeof(aeth_t);
+    else if(type == PACKET_TYPE_RETH)
+        total_len += sizeof(reth_header_t);
 
     // 1. eth hdr
     eth_header_t* eth = (eth_header_t*)dst_packet;
@@ -372,14 +374,15 @@ uint32_t build_eth_packet
 
     // 4. bth hdr
     bth_header_t* bth = (bth_header_t*)(dst_packet + sizeof(eth_header_t) + sizeof(ipv4_header_t) + sizeof(udp_header_t));
-    if(type == PACKET_TYPE_DATA)
+    if(type == PACKET_TYPE_DATA || type == PACKET_TYPE_RETH)
         bth->opcode = packet_type;
     else
         bth->opcode = 0x11;
+
     bth->se_m_pad = 0x00;
     bth->pkey = 0xffff;
     bth->qpn = htonl(qp & 0x00FFFFFF);
-    if(type == PACKET_TYPE_DATA)
+    if(type == PACKET_TYPE_DATA  || type == PACKET_TYPE_RETH)
         bth->apsn = htonl(psn | 0x80000000); // ack request
     else
         bth->apsn = htonl(psn);
@@ -402,7 +405,23 @@ uint32_t build_eth_packet
         }
     }
 
-    // 7. icrc
+    // 7. reth
+    if(type == PACKET_TYPE_RETH){
+        unsigned char* r = (unsigned char*)(dst_packet + sizeof(eth_header_t) + sizeof(ipv4_header_t) + sizeof(udp_header_t) + sizeof(bth_header_t));
+        if(reth){
+            memcpy(r, reth, sizeof(reth_header_t));
+        }
+        else{
+            memset(r, 0, sizeof(reth_header_t));
+
+        }
+        unsigned char *d = r+sizeof(reth_header_t);
+        for(int i = 0; i < data_len / 4; i++) {
+            ((uint32_t*)d)[i] = htonl(((uint32_t*)data)[i]);
+        }
+    }
+
+    // 8. icrc
     uint32_t* icrc = (uint32_t*)(dst_packet + total_len - 4);
     *icrc = compute_icrc(-1, dst_packet);
 

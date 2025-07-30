@@ -274,7 +274,7 @@ void send_packet_thread(void* arg) {
         conn->my_mac, conn->peer_mac,
         conn->my_ip, conn->peer_ip,
         conn->my_port, conn->peer_port,
-        conn->peer_qp, t_arg->psn, t_arg->psn + 1, t_arg->packet_type
+        conn->peer_qp, t_arg->psn, t_arg->psn + 1, t_arg->packet_type, NULL
     );
 
     if (pcap_sendpacket(conn->handle, (uint8_t *)packet, size) == -1) {
@@ -327,7 +327,7 @@ void forwarding(rule_t* rule, uint32_t psn, uint32_t type, uint32_t *data, int l
             conn->my_mac, conn->peer_mac,
             conn->my_ip, conn->peer_ip,
             conn->my_port, conn->peer_port,
-            conn->peer_qp, psn, psn + 1, packet_type
+            conn->peer_qp, psn, psn + 1, packet_type, NULL
         );
 
         pcap_t *handle = rule->ack_conn->handle;
@@ -345,7 +345,7 @@ void forwarding(rule_t* rule, uint32_t psn, uint32_t type, uint32_t *data, int l
                 conn->my_mac, conn->peer_mac,
                 conn->my_ip, conn->peer_ip,
                 conn->my_port, conn->peer_port,
-                conn->peer_qp, psn, psn + 1, packet_type
+                conn->peer_qp, psn, psn + 1, packet_type, NULL
             );
 
             pcap_t *handle = rule->out_conns[0]->handle;
@@ -366,7 +366,7 @@ void forwarding(rule_t* rule, uint32_t psn, uint32_t type, uint32_t *data, int l
             conn->my_mac, conn->peer_mac,
             conn->my_ip, conn->peer_ip,
             conn->my_port, conn->peer_port,
-            conn->peer_qp, psn, psn + 1, packet_type
+            conn->peer_qp, psn, psn + 1, packet_type, NULL
         );
 
         if (pcap_sendpacket(conn->handle, (uint8_t *)packet, size) == -1) {

@@ -16,6 +16,7 @@
 #include "thpool.h"
 #include "parameter.h"
 #include "topo_parser.h"
+#include <endian.h>
 
 #define WINDOW_SIZE 8 // window size 
 #define N  (2*WINDOW_SIZE) // resource allocated to one group
@@ -29,9 +30,11 @@
 #define MASK_PORT(port) (0x1<<(port))
 
 enum packet_type {
-    UP_DATA,
+    UP_DATA, // send or other write packet
     UP_ACK,
+    UP_WRITE_FIRST_ONLY,
     DOWN_DATA,
+    DOWN_WRITE_FIRST_ONLY,
     DOWN_ACK
 };
 
@@ -43,12 +46,20 @@ typedef struct metadata{
     int psn;
 } metadata_t;
 
+
 /**
  * resources allocated to each group. There is only one group in our design now.
  */
+
+
 int aggregator[N][PAYLOAD_LEN / sizeof(int)]; 
+
+reth_header_t reth_keeper[N][FAN_IN]; // every fan-in keep the rkey, addr, length
+
 uint32_t arrival_state[N]; // Max 32 ports, bitmap, need MASK and contain the result from parent, and can use mask to play the role of degree
 int degree[N]; // used to process retransmission, only degree % FAN_IN == 0, re-upload
+
+
 
 /**
  * in p4,the following topology info is in the form of args of the table actions.
@@ -208,6 +219,7 @@ void init_topology(const char *controller_ip) {
 
     memset(aggregator, 0, sizeof(aggregator));
     memset(arrival_state, 0, sizeof(arrival_state));
+    memset(reth_keeper,0,sizeof(reth_keeper));
     memset(degree, 0, sizeof(degree));
 
     init_crc32_table();
@@ -224,6 +236,7 @@ static inline void clear_state_data(int psn){
     printf("psn to clear: %d\n",psn);
     arrival_state[Idx(psn)] = 0;
     degree[Idx(psn)] = 0;
+    memset(reth_keeper[Idx(psn)],0, sizeof(reth_header_t)*FAN_IN);
     int *slot = aggregator[Idx(psn)];
     memset(slot,0,PAYLOAD_LEN);
 }
@@ -244,7 +257,23 @@ static void send_roce_data(int port, const uint8_t *data, int psn, int len, int 
         conn->my_mac, conn->peer_mac,
         conn->my_ip, conn->peer_ip,
         conn->my_port, conn->peer_port,
-        conn->peer_qp, psn, psn + 1, opcode
+        conn->peer_qp, psn, psn + 1, opcode, NULL
+    );
+    if(pcap_sendpacket(conn->handle, (uint8_t *)frame, size) == -1) {
+        fprintf(stderr, "Error sending packet: %s\n", pcap_geterr(conn->handle));
+    }
+
+}
+
+static void send_roce_data_with_reth(int port, const uint8_t *reth, const uint8_t *data, int psn, int len, int opcode){
+    connection_t *conn = conns+port;
+    uint8_t frame[5555];
+    int size = build_eth_packet(
+        frame, PACKET_TYPE_RETH, (char*)data, PAYLOAD_LEN,
+        conn->my_mac, conn->peer_mac,
+        conn->my_ip, conn->peer_ip,
+        conn->my_port, conn->peer_port,
+        conn->peer_qp, psn, psn + 1, opcode, reth
     );
     if(pcap_sendpacket(conn->handle, (uint8_t *)frame, size) == -1) {
         fprintf(stderr, "Error sending packet: %s\n", pcap_geterr(conn->handle));
@@ -260,7 +289,7 @@ static void send_roce_ack(int port, int psn){
         conn->my_mac, conn->peer_mac,
         conn->my_ip, conn->peer_ip,
         conn->my_port, conn->peer_port,
-        conn->peer_qp, psn, psn + 1, 0x11
+        conn->peer_qp, psn, psn + 1, 0x11, NULL
     );
     if(pcap_sendpacket(conn->handle, (uint8_t *)frame, size) == -1) {
         fprintf(stderr, "Error sending packet: %s\n", pcap_geterr(conn->handle));
@@ -281,21 +310,37 @@ void pipeline(metadata_t *meta_p, const struct pcap_pkthdr *pkthdr, const uint8_
     bth_header_t* bth = (bth_header_t*)(packet + sizeof(eth_header_t) + sizeof(ipv4_header_t) + sizeof(udp_header_t));
     meta_p->psn = ntohl(bth->apsn) & 0x00FFFFFF; 
     meta_p->opcode = bth->opcode;
-    if(bth->opcode == 0x04 || bth->opcode == 0x00 || bth->opcode == 0x01 || bth->opcode == 0x02) {
-        if(meta_p->ingress_port < FAN_IN){
-            meta_p->type = UP_DATA;
-        }
-        else{
-            meta_p->type = DOWN_DATA;
-        }
-    }
-    else if(bth->opcode == 0x11){
-        if(meta_p->ingress_port < FAN_IN){
-            meta_p->type = UP_ACK;
-        } 
-        else{
-            meta_p->type = DOWN_ACK;
-        }
+    switch(bth->opcode){
+        case 0x00:
+        case 0x01:
+        case 0x02:
+        case 0x04:
+        case 0x07: // write middle
+        case 0x08: // write last
+            if(meta_p->ingress_port < FAN_IN){
+                meta_p->type = UP_DATA;
+            }
+            else{
+                meta_p->type = DOWN_DATA;
+            }
+            break;
+        case 0x06:
+        case 0x0A:
+            if(meta_p->ingress_port < FAN_IN){
+                meta_p->type = UP_WRITE_FIRST_ONLY;
+            }
+            else{
+                meta_p->type = DOWN_WRITE_FIRST_ONLY;
+            }
+            break;
+        case 0x11:
+            if(meta_p->ingress_port < FAN_IN){
+                meta_p->type = UP_ACK;
+            } 
+            else{
+                meta_p->type = DOWN_ACK;
+            }
+            break;
     }
 
     // control: table match and action
@@ -378,6 +423,79 @@ void pipeline(metadata_t *meta_p, const struct pcap_pkthdr *pkthdr, const uint8_
     }
     else if(meta_p->type == DOWN_ACK){
         // impossible
+    }
+    else if(meta_p->type == UP_WRITE_FIRST_ONLY){
+        uint32_t *data = (uint32_t*)(packet + sizeof(eth_header_t) + sizeof(ipv4_header_t) + sizeof(udp_header_t) + sizeof(bth_header_t) + sizeof(reth_header_t));
+        int data_len = (ntohs(udp->length) - sizeof(reth_header_t) - sizeof(bth_header_t) - sizeof(udp_header_t) - 4); // icrc = 4
+        assert(data_len == PAYLOAD_LEN);
+        degree[Idx(meta_p->psn)]+=1;
+        char *reth = (char *)(packet + sizeof(eth_header_t) + sizeof(ipv4_header_t) + sizeof(udp_header_t) + sizeof(bth_header_t));
+
+        if(root){
+            if(recv_from_port(meta_p->ingress_port, meta_p->psn)){
+                if(recv_from_port(FAN_IN, meta_p->psn)){ // has recieved from parent (as for root, it means aggregation completed), just forward to the port
+                    send_roce_data_with_reth(meta_p->ingress_port, (uint8_t *)(&(reth_keeper[Idx(meta_p->psn)][meta_p->ingress_port])), (uint8_t *)aggregator[Idx(meta_p->psn)], meta_p->psn, PAYLOAD_LEN, meta_p->opcode);
+                }
+            }
+            else{ // first transmission
+                set_arrive_state(meta_p->ingress_port, meta_p->psn);
+                memcpy(&(reth_keeper[Idx(meta_p->psn)][meta_p->ingress_port]), reth, sizeof(reth_header_t));
+                for(int i=0;i<data_len/sizeof(int);++i){
+                    aggregator[Idx(meta_p->psn)][i] += ntohl(data[i]);
+                }
+
+                if(recv_from_all_fan_in(meta_p->psn)){
+                    set_arrive_state(FAN_IN, meta_p->psn);
+                    clear_state_data(meta_p->psn + WINDOW_SIZE);
+                    // broadcast
+                    for(int i=0;i<FAN_IN;++i){
+                        send_roce_data_with_reth(i, (uint8_t *)(&(reth_keeper[Idx(meta_p->psn)][i])), (uint8_t *)aggregator[Idx(meta_p->psn)], meta_p->psn, PAYLOAD_LEN, meta_p->opcode);
+                    }
+                }
+            }
+        }
+        else{
+            if(recv_from_port(meta_p->ingress_port, meta_p->psn)){ // retransmission
+                if(recv_from_port(FAN_IN, meta_p->psn)){ // has recieved from parent, just forward to the port
+                    send_roce_data_with_reth(meta_p->ingress_port, (uint8_t *)(&(reth_keeper[Idx(meta_p->psn)][meta_p->ingress_port])), (uint8_t *)aggregator[Idx(meta_p->psn)], meta_p->psn, PAYLOAD_LEN, meta_p->opcode);
+                }
+                else{   // under this condition, all child can't get the result packet, so all fan in will retransmit packets.
+                    if(recv_from_all_fan_in(meta_p->psn) && degree[Idx(meta_p->psn)]%FAN_IN==0){
+                        send_roce_data_with_reth(FAN_IN, NULL, (uint8_t *)aggregator[Idx(meta_p->psn)], meta_p->psn, PAYLOAD_LEN, meta_p->opcode);
+                    }
+                }
+            }
+            else{ // first transmission
+                set_arrive_state(meta_p->ingress_port, meta_p->psn);
+                memcpy(&(reth_keeper[Idx(meta_p->psn)][meta_p->ingress_port]), reth, sizeof(reth_header_t));
+
+                for(int i=0;i<data_len/sizeof(int);++i){
+                    aggregator[Idx(meta_p->psn)][i] += ntohl(data[i]);
+                }
+
+                if(recv_from_all_fan_in(meta_p->psn)){
+                    // forward to parent
+                    send_roce_data_with_reth(FAN_IN, NULL, (uint8_t *)aggregator[Idx(meta_p->psn)], meta_p->psn, PAYLOAD_LEN, meta_p->opcode);
+                }
+
+            }
+        }
+    }
+    else if(meta_p->type == DOWN_WRITE_FIRST_ONLY){
+         uint32_t *data = (uint32_t*)(packet + sizeof(eth_header_t) + sizeof(ipv4_header_t) + sizeof(udp_header_t) + sizeof(bth_header_t) + sizeof(reth_header_t));
+        int data_len = (ntohs(udp->length) - sizeof(reth_header_t) - sizeof(bth_header_t) - sizeof(udp_header_t) - 4); // icrc = 4
+        assert(data_len == PAYLOAD_LEN);
+        if(!recv_from_port(FAN_IN, meta_p->psn) && recv_from_all_fan_in(meta_p->psn)){ // the second condition is very important! see 6.24 draft.
+            memcpy(aggregator[Idx(meta_p->psn)], data, PAYLOAD_LEN);
+            set_arrive_state(FAN_IN,meta_p->psn);
+            // broadcast()
+            for(int i=0;i<FAN_IN;++i){
+                send_roce_data_with_reth(i, (uint8_t *)(&(reth_keeper[Idx(meta_p->psn)][i])), (uint8_t *)aggregator[Idx(meta_p->psn)], meta_p->psn, PAYLOAD_LEN, meta_p->opcode);
+            }
+        }
+        else {
+            return; // just ignore, very rare
+        }
     }
 
 }

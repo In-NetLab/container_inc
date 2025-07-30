@@ -144,11 +144,11 @@ int main() {
         // info.ports.push_back({"ens5","10.0.3.1","52:54:00:ed:37:6a"});
         // info.ports.push_back({"ens6","10.0.5.2","52:54:00:ef:a1:46"});
         // preknowledge_switchtopo["10.215.8.78"] = info;
-        info.control_ip = "10.215.8.12";
+        info.control_ip = "10.215.8.157";
         info.id = 0;
-        info.ports.push_back({"ens4","10.0.0.1","52:54:00:16:7b:e5"});
-        info.ports.push_back({"ens5","10.0.1.1","52:54:00:1c:1b:82"});
-        preknowledge_switchtopo["10.215.8.12"] = info;
+        info.ports.push_back({"ens4","10.0.0.1","52:54:00:51:87:bc"});
+        info.ports.push_back({"ens5","10.0.1.1","52:54:00:57:4d:d5"});
+        preknowledge_switchtopo["10.215.8.157"] = info;
     }
 
     // establish connections with all switches
