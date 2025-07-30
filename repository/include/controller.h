@@ -168,7 +168,7 @@ struct controller_communicator{
         addr.s_addr = group->ip_list[0]; 
         inet_ntop(AF_INET, &addr, rankip, INET_ADDRSTRLEN); 
         switches[0].connections[0].peer_ip = rankip;
-        switches[0].connections[0].peer_mac = "52:54:00:a0:e6:9a"; // need to config manually
+        switches[0].connections[0].peer_mac = "52:54:00:9e:ed:87"; // ens4 need to config manually
         switches[0].connections[0].peer_port = 4791;
         switches[0].connections[0].peer_qp = qp_list[0];
         //rank 1
@@ -177,7 +177,7 @@ struct controller_communicator{
         addr.s_addr = group->ip_list[1]; 
         inet_ntop(AF_INET, &addr, rankip, INET_ADDRSTRLEN); 
         switches[0].connections[1].peer_ip = rankip;
-        switches[0].connections[1].peer_mac = "52:54:00:07:1b:5b"; // need to config manually
+        switches[0].connections[1].peer_mac = "52:54:00:13:b0:a7"; // ens4 need to config manually
         switches[0].connections[1].peer_port = 4791;
         switches[0].connections[1].peer_qp = qp_list[1];
 

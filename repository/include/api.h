@@ -35,8 +35,9 @@
 #define INCCL_HEADER_LEN 8
 #define GID_IDX 1
 
-
-
+#define WINDOW_SIZE 8192 //in bytes
+#define MESSAGE_SIZE (4 * (PAYLOAD_LEN)) // tradeoff between window shift efficiency and the overhead of posting send 
+#define PAYLOAD_COUNT ((MESSAGE_SIZE) / (sizeof(int))) // 元素个数
 
 struct inccl_group{
     // group info
@@ -78,6 +79,7 @@ struct inccl_rank_exchange_info{
 struct inccl_communicator{
     struct inccl_group *group;
     uint32_t payload_buf_size; // need to up round, mod payload_mtu
+    uint32_t window_size; // need to reach an agreement with switch
     // char inccl_header[inccl_HEADER_LEN]; // first bytes in buffer
     char *send_payload; // following bytes in buffer
     char *receive_payload;
@@ -94,4 +96,6 @@ int inccl_group_destroy(struct inccl_group *group);
 struct inccl_communicator *inccl_communicator_create(struct inccl_group *group, uint32_t size);
 int inccl_communicator_destroy(struct inccl_communicator *comm);
 
-int inccl_allreduce(struct inccl_communicator *comm, void *src_addr, void *dst_addr, uint32_t size, int type, int opcode);
+void inccl_allreduce_sendrecv(struct inccl_communicator *comm, int32_t* src_data, uint32_t len, int32_t* dst_data);
+
+void inccl_allreduce_write(struct inccl_communicator *comm, int32_t* src_data, uint32_t len, int32_t* dst_data);

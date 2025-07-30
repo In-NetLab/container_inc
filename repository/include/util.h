@@ -49,6 +49,12 @@ typedef struct {
     uint32_t syn_msn; // syndrome + msn
 } aeth_t;
 
+typedef struct {
+	uint64_t va;
+	uint32_t rkey;
+	uint32_t len;
+} reth_header_t;
+
 
 typedef struct {
     char device[16]; // 网卡设备名
@@ -74,8 +80,9 @@ typedef struct {
 #define PACKET_TYPE_ACK 1
 #define PACKET_TYPE_NAK 2
 #define PACKET_TYPE_DATA_SINGLE 3
+#define PACKET_TYPE_RETH 4
+
 #define PAYLOAD_LEN 1024 // mtu bytes
-#define PAYLOAD_COUNT 1024 // 元素个数
 #define ELEMENT_SIZE sizeof(int32_t)
 
 typedef struct {
@@ -117,7 +124,7 @@ uint32_t build_eth_packet
     uint32_t src_ip, uint32_t dst_ip,
     uint16_t src_port, uint16_t dst_port,
     uint32_t qp, uint32_t psn, 
-    uint32_t msn, int packet_type
+    uint32_t msn, int packet_type, const uint8_t *reth
 );
 
 uint64_t get_now_ts();
